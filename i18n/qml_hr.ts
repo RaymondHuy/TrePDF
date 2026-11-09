@@ -5389,7 +5389,7 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <translation>Tekst ćelije</translation>
     </message>
     <message id="TableCellApply">
-        <location filename="../src/Components/TableCellEditor.qml" line="159"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="213"/>
         <source>Apply</source>
         <translation>Primijeni</translation>
     </message>
@@ -5424,9 +5424,30 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <translation>Tekst ne stane u ovu ćeliju. Skratite ga ili povećajte redak ili stupac.</translation>
     </message>
     <message id="TableCellInlineHint">
-        <location filename="../src/Components/TableCellEditor.qml" line="143"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="193"/>
         <source>Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel</source>
         <translation>Enter: novi redak · Tab: sljedeća ćelija · Ctrl/Cmd+Enter: dovrši · Esc: odustani</translation>
+    </message>
+    <message id="TableCellInvalidFormat">
+        <location filename="../src/PDFEditControllerTable.cpp" line="131"/>
+        <location filename="../src/PDFEditControllerTable.cpp" line="171"/>
+        <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
+        <translation>Oblikovanje ćelije nije valjano ili je presloženo. Smanjite broj promjena fonta ili stila.</translation>
+    </message>
+    <message id="TableCellProperties">
+        <location filename="../src/Components/TableCellPanel.qml" line="57"/>
+        <source>Cell properties</source>
+        <translation>Svojstva ćelije</translation>
+    </message>
+    <message id="TableCellPosition">
+        <location filename="../src/Components/TableCellPanel.qml" line="67"/>
+        <source>Row %1 · Column %2</source>
+        <translation>Redak %1 · Stupac %2</translation>
+    </message>
+    <message id="TableCellGoTo">
+        <location filename="../src/Components/TableCellPanel.qml" line="176"/>
+        <source>Go to cell</source>
+        <translation>Idi na ćeliju</translation>
     </message>
 </context>
 </TS>

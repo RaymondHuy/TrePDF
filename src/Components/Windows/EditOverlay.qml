@@ -3449,6 +3449,9 @@ Item {
                 tableRowStops: draftItem.modelData.tableRowStops ?? []
                 tableColumnStops: draftItem.modelData.tableColumnStops ?? []
                 tableCellTexts: draftItem.modelData.tableCellTexts ?? []
+                tableCellFormats: draftItem.modelData.tableCellFormats ?? []
+                tableTextController: root.controller
+                tableTextFamily: draftItem.modelData.tableFontFamily || ""
                 tableCellRects: root.normalizedRectsForFrame(
                     draftItem.modelData.tableCellRects ?? [], draftItem.modelData.frameRect)
                 tableTextFont: root.controller.fontForDisplay(

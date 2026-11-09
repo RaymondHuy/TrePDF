@@ -5,6 +5,7 @@
 #include "PDFSaveWriter.h"
 #include "PDFWebLinkScanner.h"
 #include "PDFWatermark.h"
+#include "PDFTableCellFormat.h"
 
 #include <QByteArray>
 #include <QColor>
@@ -15,6 +16,7 @@
 #include <QObject>
 #include <QPointF>
 #include <QPointer>
+#include <QQuickTextDocument>
 #include <QRectF>
 #include <QSet>
 #include <QString>
@@ -531,6 +533,13 @@ public:
     Q_INVOKABLE void updateSelectedFrameRect(const QRectF &frameRect);
     Q_INVOKABLE void updateSelectedTableDivider(bool column, int index, qreal position);
     Q_INVOKABLE QString setSelectedTableCellText(int row, int column, const QString &text);
+    Q_INVOKABLE QString setSelectedTableCellContent(int row, int column, const QString &text,
+                                                   const QVariantMap &format);
+    Q_INVOKABLE void initializeTableCellEditor(QQuickTextDocument *document, const QString &text,
+                                               const QVariantMap &format, const QVariantMap &editorState);
+    Q_INVOKABLE QVariantMap tableCellEditorState(QQuickTextDocument *document) const;
+    Q_INVOKABLE QString applyTableCellEditorFormat(QQuickTextDocument *document,
+                                                   const QString &property, const QVariant &value);
     Q_INVOKABLE void updateSelectedContentBounds(const QRectF &contentBounds);
     Q_INVOKABLE void finishSelectedFrameResize();
     Q_INVOKABLE void cancelSelectedFrameResize();
@@ -822,6 +831,7 @@ private:
         QVector<qreal> tableRowStops;
         QVector<qreal> tableColumnStops;
         QStringList tableCellTexts;
+        PDFTableCellFormat::Cells tableCellFormats;
         QString tableFontFamily;
         qreal tableFontSize = 12.0;
         QString tableId;
@@ -909,6 +919,7 @@ private:
         QVector<qreal> tableRowStops;
         QVector<qreal> tableColumnStops;
         QStringList tableCellTexts;
+        PDFTableCellFormat::Cells tableCellFormats;
         QString tableFontFamily;
         qreal tableFontSize = 12.0;
         QString tableId;

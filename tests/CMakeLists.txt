@@ -113,6 +113,8 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/PDFEditControllerClipboard.cpp
     ../src/PDFEditControllerGeometry.cpp
     ../src/PDFEditControllerTable.cpp
+    ../src/PDFEditControllerTableEditor.cpp
+    ../src/PDFTableCellFormat.h
     ../src/PDFTableCellLayout.h
     ../src/PDFTableCellMetadata.h
     ../src/PDFEditControllerHeaderText.cpp

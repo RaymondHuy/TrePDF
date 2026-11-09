@@ -212,6 +212,9 @@ struct SaveDraft {
     QVector<qreal> tableRowStops;
     QVector<qreal> tableColumnStops;
     QStringList tableCellTexts;
+    PDFTableCellFormat::Cells tableCellFormats;
+    QVector<SaveFormat> tableDefaultFormats;
+    QVector<QVector<SaveSpan>> tableCharacterSpans;
     QString tableFontFamily;
     qreal tableFontSize = 12.0;
     QString tableId;
@@ -1219,6 +1222,10 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
     while (firstVisible < lineEnd && draft.text.at(firstVisible).isSpace()) {
         ++firstVisible;
     }
+    // Table formatting owns spaces too (notably underlining). Keep their
+    // exact style boundaries instead of borrowing a neighboring word's face.
+    if (!draft.tableCellFormats.isEmpty())
+        firstVisible = lineStart;
     if (firstVisible == lineEnd) {
         return true;
     }
@@ -1274,7 +1281,9 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
     }
     for (const SaveSpan &span : draft.characterSpans) {
         for (qsizetype position : {span.start, span.start + span.length}) {
-            if (position > firstVisible && position < lineEnd
+            if (position > lineStart && position < lineEnd && !draft.tableCellFormats.isEmpty()) {
+                boundaries.append(position);
+            } else if (position > firstVisible && position < lineEnd
                 && !draft.text.at(position).isSpace()
                 && graphemeStarts.contains(position)
                 && glyphStarts.contains(position)) {
@@ -1301,6 +1310,8 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
         return cached.value();
     };
     for (qsizetype index = 1; index + 1 < boundaries.size(); ++index) {
+        if (!draft.tableCellFormats.isEmpty())
+            break;
         const qsizetype end = boundaries[index];
         qsizetype spaceStart = end;
         while (spaceStart > boundaries[index - 1]
@@ -1314,6 +1325,8 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
             boundaries[index] = spaceStart;
     }
     const auto visibleFormatPosition = [&](qsizetype position, qsizetype end) {
+        if (!draft.tableCellFormats.isEmpty())
+            return position;
         while (position + 1 < end && draft.text.at(position).isSpace())
             ++position;
         return position;
@@ -1359,6 +1372,10 @@ bool appendSpacedLineRuns(const SaveDraft &draft,
         // each multi-character word still establishes horizontal text flow.
         const bool merge = !positionedRuns.isEmpty() && positioned && positionedRuns.last()
             && !draft.text.at(start - 1).isSpace() && !draft.text.at(start).isSpace()
+            && (draft.tableCellFormats.isEmpty()
+                || PDFTableCellFormat::styleAt(draft.tableCellFormats.constFirst(), int(start))
+                    == PDFTableCellFormat::styleAt(draft.tableCellFormats.constFirst(),
+                        int(positionedBoundaries[positionedBoundaries.size() - 2])))
             && samePositionedFormat(
                 formatAt(draft, qMax(positionedBoundaries[positionedBoundaries.size() - 2], firstVisible)),
                 formatAt(draft, qMax(start, firstVisible)));
@@ -1700,6 +1717,40 @@ QVector<LayoutRun> layoutRuns(const SaveDraft &draft,
     return runs;
 }
 
+bool tableCellDraftFits(const SaveDraft &draft, const QSizeF &size, qreal pageHeight)
+{
+    if (draft.text.isEmpty())
+        return true;
+    if (size.isEmpty())
+        return false;
+    qreal height = 1.0;
+    qsizetype start = 0;
+    for (const QString &paragraph : draft.text.split(QLatin1Char('\n'))) {
+        QTextLayout layout(paragraph.isEmpty() ? QStringLiteral(" ") : paragraph,
+                           displayFont(formatAt(draft, start), pageHeight));
+        QTextOption option;
+        option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        layout.setTextOption(option);
+        if (!paragraph.isEmpty())
+            layout.setFormats(layoutFormats(draft, start, paragraph.size(), pageHeight));
+        layout.beginLayout();
+        bool fits = true;
+        for (QTextLine line = layout.createLine(); line.isValid(); line = layout.createLine()) {
+            line.setLineWidth(size.width());
+            height += line.height();
+            if (height > size.height() + .001 || line.naturalTextWidth() > size.width() + .001) {
+                fits = false;
+                break;
+            }
+        }
+        layout.endLayout();
+        if (!fits)
+            return false;
+        start += paragraph.size() + 1;
+    }
+    return true;
+}
+
 SourceObject sourceObjectAtPath(FPDF_PAGE page, const QVector<int> &objectPath)
 {
     if (!page || objectPath.isEmpty()) {
@@ -1773,8 +1824,14 @@ public:
         for (const SaveDraft &draft : drafts) {
             if (draft.kind == SaveDraft::Kind::Shape && !draft.deleted
                 && !draft.tableCellTexts.isEmpty()) {
-                collect(draft.originalFormat,
-                        draft.tableCellTexts.join(QLatin1Char('\n')));
+                if (draft.tableCellFormats.isEmpty()) {
+                    collect(draft.originalFormat, draft.tableCellTexts.join(QLatin1Char('\n')));
+                } else {
+                    for (qsizetype cell = 0; cell < draft.tableCellTexts.size(); ++cell) {
+                        for (const SaveSpan &span : draft.tableCharacterSpans[cell])
+                            collect(span.format, draft.tableCellTexts[cell].sliced(span.start, span.length));
+                    }
+                }
                 continue;
             }
             if (draft.kind != SaveDraft::Kind::Text || draft.deleted || draft.movesSourceObjects)
@@ -3427,6 +3484,7 @@ PDFSaveWriter::Result createShapeDraftObject(
     metadata.tableRowStops = draft.tableRowStops;
     metadata.tableColumnStops = draft.tableColumnStops;
     metadata.tableCellTexts = draft.tableCellTexts;
+    metadata.tableCellFormats = draft.tableCellFormats;
     metadata.tableId = draft.tableId;
     metadata.tableFontFamily = draft.tableFontFamily;
     metadata.tableFontSize = draft.tableFontSize;
@@ -3576,13 +3634,17 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             textDraft.added = true;
             textDraft.text = draft.tableCellTexts[cell];
             textDraft.frameRect = cells[cell];
-            textDraft.originalFormat = draft.originalFormat;
+            textDraft.originalFormat = draft.tableCellFormats.isEmpty()
+                ? draft.originalFormat : draft.tableDefaultFormats[cell];
+            if (!draft.tableCellFormats.isEmpty()) {
+                textDraft.characterSpans = draft.tableCharacterSpans[cell];
+                textDraft.tableCellFormats = {draft.tableCellFormats[cell]};
+            }
             textDraft.preservePhysicalFontSizes = true;
             textDraft.tableId = draft.tableId;
             textDraft.tableCellIndex = cell;
-            if (!PDFTableCellLayout::fits(textDraft.text,
-                    displayFont(textDraft.originalFormat, pageHeight),
-                    QSizeF(cells[cell].width() * pageWidth, cells[cell].height() * pageHeight)))
+            const QSizeF cellSize(cells[cell].width() * pageWidth, cells[cell].height() * pageHeight);
+            if (!tableCellDraftFits(textDraft, cellSize, pageHeight))
                 return failure(PDFSaveWriter::Error::TextObjectCreationFailed, draft.page, draft.objectId);
             result = createDraftObjects(document, page, textDraft, pageWidth, pageHeight,
                 nullptr, {}, fontResolver, coordinateMapper, objects, bitmaps);
@@ -3878,7 +3940,8 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 ? PDFTableCellMetadata::write(document, textObject, draft.tableId,
                     draft.tableCellIndex, tableFragmentIndex++, int(runs.size()),
                     int(run.textStart), int(run.textLength), run.text,
-                    fontResolver.tableFontFingerprints())
+                    fontResolver.tableFontFingerprints(), draft.tableCellFormats.isEmpty()
+                        ? nullptr : &draft.tableCellFormats.constFirst())
                 : (markTextSpacing(document, textObject, run, pageHeight, originOffset)
                    && markParagraphLayout(document, textObject, run,
                                           pageWidth, pageHeight, originOffset)
@@ -3898,7 +3961,13 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 run,
                 fontSize,
                 coordinateMapper);
-            if (!underline || !markUnderlinePair(document, textObject, underline)) {
+            const bool marked = underline && (draft.tableCellIndex >= 0
+                ? PDFTableCellMetadata::writeUnderline(document, underline, draft.tableId,
+                    draft.tableCellIndex, tableFragmentIndex - 1, int(runs.size()),
+                    int(run.textStart), int(run.textLength), run.text,
+                    draft.tableCellFormats.constFirst())
+                : markUnderlinePair(document, textObject, underline));
+            if (!marked) {
                 if (underline) {
                     FPDFPageObj_Destroy(underline);
                 }
@@ -7552,6 +7621,7 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.tableRowStops = draft->tableRowStops;
         saveDraft.tableColumnStops = draft->tableColumnStops;
         saveDraft.tableCellTexts = draft->tableCellTexts;
+        saveDraft.tableCellFormats = draft->tableCellFormats;
         saveDraft.tableFontFamily = draft->tableFontFamily;
         saveDraft.tableFontSize = draft->tableFontSize;
         saveDraft.tableId = draft->tableId;
@@ -7603,6 +7673,24 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             format.color = Qt::black;
             saveDraft.originalFormat = copiedFormat(format,
                 saveDraft.tableCellTexts.join(QLatin1Char('\n')));
+            for (qsizetype cell = 0; cell < saveDraft.tableCellFormats.size(); ++cell) {
+                const auto copyStyle = [&](const PDFTableCellFormat::Style &style, const QString &text) {
+                    auto styled = format;
+                    styled.fontFamily = style.family;
+                    styled.fontBold = style.bold;
+                    styled.fontItalic = style.italic;
+                    styled.fontUnderline = style.underline;
+                    return copiedFormat(styled, text);
+                };
+                const auto &cellFormat = saveDraft.tableCellFormats[cell];
+                saveDraft.tableDefaultFormats.append(copyStyle(cellFormat.defaultStyle, QString()));
+                QVector<SaveSpan> spans;
+                for (const auto &span : cellFormat.spans) {
+                    spans.append(SaveSpan{span.start, span.length, copyStyle(span.style,
+                        saveDraft.tableCellTexts[cell].sliced(span.start, span.length))});
+                }
+                saveDraft.tableCharacterSpans.append(std::move(spans));
+            }
         }
         if (saveDraft.kind == SaveDraft::Kind::Image
             || saveDraft.kind == SaveDraft::Kind::Shape

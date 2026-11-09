@@ -810,6 +810,10 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("tableRows"), candidate.tableRows);
     map.insert(QStringLiteral("tableColumns"), candidate.tableColumns);
     map.insert(QStringLiteral("tableCellTexts"), draft.tableCellTexts);
+    QVariantList tableFormats;
+    for (const auto &format : draft.tableCellFormats)
+        tableFormats.append(PDFTableCellFormat::toVariant(format));
+    map.insert(QStringLiteral("tableCellFormats"), tableFormats);
     map.insert(QStringLiteral("tableFontFamily"), draft.tableFontFamily);
     map.insert(QStringLiteral("tableFontSize"), draft.tableFontSize);
     QVariantList cellRects;
@@ -1047,6 +1051,7 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.tableRowStops == right.tableRowStops
         && left.tableColumnStops == right.tableColumnStops
         && left.tableCellTexts == right.tableCellTexts
+        && left.tableCellFormats == right.tableCellFormats
         && left.tableFontFamily == right.tableFontFamily
         && left.tableFontSize == right.tableFontSize
         && left.tableId == right.tableId

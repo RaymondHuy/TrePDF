@@ -29,11 +29,18 @@ Nội dung đang nhập thuộc workspace, độc lập với delegate trang đ�
 dụng. Cuộn trang ra ngoài màn hình rồi quay lại không mất chữ; hủy hoặc thay
 đổi lịch sử tài liệu loại bỏ phiên nhập cũ. Khung nhập đi theo zoom/xoay trang.
 
-Phiên bản này dùng một font cho cả bảng, chọn cùng cơ chế font mặc định của
-Add Text, cỡ 12 pt, màu đen. Giới hạn 1.024 đơn vị UTF-16 mỗi ô và 8.192 cho
-cả bảng; xuống dòng được chuẩn hóa về LF, chữ về Unicode NFC. Không hỗ trợ
-rich text hoặc đổi font riêng từng ô. Nếu font không có đủ ký tự, người dùng
-cần cài font phù hợp trong Settings → Font.
+Panel Thuộc tính ô bên phải cung cấp font, Bold/Italic/Underline, thông báo
+lỗi và Áp dụng/Hủy; nhập chữ vẫn diễn ra trực tiếp trong ô. Panel thay panel
+thuộc tính hình trong lúc nhập và không che nội dung trang. Khi cuộn khỏi ô,
+panel giữ nguyên; Chuyển đến ô đưa người dùng trở lại ô đang nhập. Định dạng áp
+dụng cho đoạn đang bôi đen; khi không bôi đen, chỉ chữ gõ tiếp nhận định dạng
+đã chọn. Ctrl/Cmd+B, I, U tương đương các nút trên panel. Font mặc định
+dùng cùng cơ chế với Add Text; cỡ chữ vẫn là 12 pt, màu đen. Các face phải
+có sẵn và hỗ trợ ký tự, không tổng hợp Bold/Italic khi thiếu face. Giới hạn
+1.024 đơn vị UTF-16 mỗi ô và 8.192 cho cả bảng; xuống dòng được chuẩn hóa về
+LF, chữ về Unicode NFC. Mỗi ô tối đa 256 đoạn định dạng, cả bảng tối đa
+1.024 đoạn; metadata vẫn có giới hạn kích thước. Nếu thiếu font, cài trong
+Settings → Font. Định dạng của ô trống cũng được lưu để lần nhập sau dùng lại.
 
 Chữ tự xuống dòng trong ô, cách đường kẻ 3 pt. Nội dung quá cao hoặc quá rộng
 sẽ báo lỗi và giữ nguyên phần đang nhập. Kéo đường phân cách hoặc thu nhỏ bảng
@@ -63,9 +70,12 @@ geometry, paint và fingerprint đường vẽ. Bảng đã sửa đường phâ
 version 3, thêm mảng `rowStops`/`columnStops` cho cả hai chiều. Reader tiếp tục
 đọc version 2, nên bảng cũ cũng kéo được đường phân cách. Shape cũ tiếp tục
 dùng version 1. Bảng có nội dung dùng version 4, bổ sung ID nhóm, nội dung ô,
-font và cỡ chữ. Các text object con có marker `TrePDFTableCell`; chúng là chữ
+font và cỡ chữ. Version 5 bổ sung các đoạn font/B/I/U theo chỉ số UTF-16
+và định dạng mặc định từng ô, đồng thời tiếp tục đọc version 4. Các text object con có marker `TrePDFTableCell`; chúng là chữ
 PDF thực để tìm kiếm/sao chép, không phải ảnh hoặc nét outline. Writer dùng
-chung pipeline nhúng font với Add Text.
+chung pipeline nhúng font với Add Text. Nét underline dùng child marker
+của bảng, được kiểm tra geometry và liên kết với fragment chữ tương ứng;
+di chuyển, xóa và suppression xử lý cả chữ lẫn các nét này.
 
 Khi mở lại hoặc lưu sửa đổi, scanner/writer kiểm tra số hàng/cột là số nguyên
 trong giới hạn, kiểm các mảng tỉ lệ đúng số lượng, hữu hạn, tăng dần và cách

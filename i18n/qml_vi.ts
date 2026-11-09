@@ -5510,7 +5510,7 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <translation>Nội dung ô</translation>
     </message>
     <message id="TableCellApply">
-        <location filename="../src/Components/TableCellEditor.qml" line="159"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="213"/>
         <source>Apply</source>
         <translation>Áp dụng</translation>
     </message>
@@ -5545,9 +5545,30 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <translation>Nội dung không vừa ô này. Hãy rút ngắn nội dung hoặc tăng kích thước hàng hay cột.</translation>
     </message>
     <message id="TableCellInlineHint">
-        <location filename="../src/Components/TableCellEditor.qml" line="143"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="193"/>
         <source>Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel</source>
         <translation>Enter: xuống dòng · Tab: ô kế tiếp · Ctrl/Cmd+Enter: hoàn tất · Esc: hủy</translation>
+    </message>
+    <message id="TableCellInvalidFormat">
+        <location filename="../src/PDFEditControllerTable.cpp" line="131"/>
+        <location filename="../src/PDFEditControllerTable.cpp" line="171"/>
+        <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
+        <translation>Định dạng ô không hợp lệ hoặc quá phức tạp. Hãy giảm số lần đổi font hoặc kiểu chữ.</translation>
+    </message>
+    <message id="TableCellProperties">
+        <location filename="../src/Components/TableCellPanel.qml" line="57"/>
+        <source>Cell properties</source>
+        <translation>Thuộc tính ô</translation>
+    </message>
+    <message id="TableCellPosition">
+        <location filename="../src/Components/TableCellPanel.qml" line="67"/>
+        <source>Row %1 · Column %2</source>
+        <translation>Hàng %1 · Cột %2</translation>
+    </message>
+    <message id="TableCellGoTo">
+        <location filename="../src/Components/TableCellPanel.qml" line="176"/>
+        <source>Go to cell</source>
+        <translation>Chuyển đến ô</translation>
     </message>
 </context>
 </TS>

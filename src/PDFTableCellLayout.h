@@ -1,5 +1,7 @@
 #pragma once
 
+#include "PDFTableCellFormat.h"
+
 #include <QFont>
 #include <QRectF>
 #include <QString>
@@ -66,15 +68,34 @@ inline QVector<QRectF> cellRects(const QRectF &frame, const QSizeF &pageSize,
     return result;
 }
 
-inline bool fits(const QString &text, const QFont &font, const QSizeF &size)
+inline bool fits(const QString &text, const QFont &font, const QSizeF &size,
+                 const PDFTableCellFormat::Cell &format = {})
 {
     if (text.isEmpty())
         return true;
     if (!validText(text) || size.isEmpty())
         return false;
     qreal height = 1.0; // The added-text writer starts one point below its frame.
+    int paragraphStart = 0;
     for (const QString &paragraph : text.split(QLatin1Char('\n'))) {
-        QTextLayout layout(paragraph.isEmpty() ? QStringLiteral(" ") : paragraph, font);
+        const bool formatted = !format.defaultStyle.family.isEmpty();
+        const auto paragraphFont = formatted
+            ? PDFTableCellFormat::displayFont(PDFTableCellFormat::styleAt(format, paragraphStart),
+                                              font.pixelSize()) : font;
+        QTextLayout layout(paragraph.isEmpty() ? QStringLiteral(" ") : paragraph, paragraphFont);
+        if (formatted && !paragraph.isEmpty()) {
+            QVector<QTextLayout::FormatRange> ranges;
+            for (const auto &span : format.spans) {
+                const int start = qMax(paragraphStart, span.start);
+                const int end = qMin(paragraphStart + int(paragraph.size()), span.start + span.length);
+                if (end > start) {
+                    QTextCharFormat characterFormat;
+                    characterFormat.setFont(PDFTableCellFormat::displayFont(span.style, font.pixelSize()));
+                    ranges.append({start - paragraphStart, end - start, characterFormat});
+                }
+            }
+            layout.setFormats(ranges);
+        }
         QTextOption option;
         option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
         layout.setTextOption(option);
@@ -94,6 +115,7 @@ inline bool fits(const QString &text, const QFont &font, const QSizeF &size)
         layout.endLayout();
         if (!fits)
             return false;
+        paragraphStart += int(paragraph.size()) + 1;
     }
     return true;
 }
