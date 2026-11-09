@@ -5387,7 +5387,7 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <translation>ข้อความในเซลล์</translation>
     </message>
     <message id="TableCellApply">
-        <location filename="../src/Components/TableCellEditor.qml" line="159"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="213"/>
         <source>Apply</source>
         <translation>นำไปใช้</translation>
     </message>
@@ -5422,9 +5422,30 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <translation>ข้อความยาวเกินเซลล์นี้ โปรดย่อข้อความหรือขยายแถวหรือคอลัมน์</translation>
     </message>
     <message id="TableCellInlineHint">
-        <location filename="../src/Components/TableCellEditor.qml" line="143"/>
+        <location filename="../src/Components/TableCellPanel.qml" line="193"/>
         <source>Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel</source>
         <translation>Enter: ขึ้นบรรทัดใหม่ · Tab: เซลล์ถัดไป · Ctrl/Cmd+Enter: เสร็จสิ้น · Esc: ยกเลิก</translation>
+    </message>
+    <message id="TableCellInvalidFormat">
+        <location filename="../src/PDFEditControllerTable.cpp" line="131"/>
+        <location filename="../src/PDFEditControllerTable.cpp" line="171"/>
+        <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
+        <translation>รูปแบบเซลล์ไม่ถูกต้องหรือซับซ้อนเกินไป โปรดลดจำนวนครั้งที่เปลี่ยนแบบอักษรหรือรูปแบบตัวอักษร</translation>
+    </message>
+    <message id="TableCellProperties">
+        <location filename="../src/Components/TableCellPanel.qml" line="57"/>
+        <source>Cell properties</source>
+        <translation>คุณสมบัติเซลล์</translation>
+    </message>
+    <message id="TableCellPosition">
+        <location filename="../src/Components/TableCellPanel.qml" line="67"/>
+        <source>Row %1 · Column %2</source>
+        <translation>แถว %1 · คอลัมน์ %2</translation>
+    </message>
+    <message id="TableCellGoTo">
+        <location filename="../src/Components/TableCellPanel.qml" line="176"/>
+        <source>Go to cell</source>
+        <translation>ไปยังเซลล์</translation>
     </message>
 </context>
 </TS>

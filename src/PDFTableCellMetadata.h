@@ -120,25 +120,104 @@ inline QString extractedText(const QString &text)
     return result;
 }
 
-inline bool write(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const QString &id,
-                   int cell, int index, int count, int start, int length,
-                   const QString &text, FontFingerprints &fonts)
+inline QJsonObject styleObject(const PDFTableCellFormat::Style &style)
 {
-    const QJsonArray physical = signature(object, fonts);
-    if (physical.isEmpty() || FPDFPageObj_CountMarks(object) != 0)
+    return {{QStringLiteral("family"), style.family}, {QStringLiteral("bold"), style.bold},
+            {QStringLiteral("italic"), style.italic}, {QStringLiteral("underline"), style.underline}};
+}
+
+inline QJsonArray underlineSignature(FPDF_PAGEOBJECT object)
+{
+    if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_PATH
+        || FPDFPath_CountSegments(object) != 2 || FPDFPageObj_GetDashCount(object) != 0
+        || FPDFPageObj_GetLineCap(object) != FPDF_LINECAP_BUTT
+        || FPDFPageObj_GetLineJoin(object) != FPDF_LINEJOIN_MITER)
+        return {};
+    const FPDF_CLIPPATH clip = FPDFPageObj_GetClipPath(object);
+    if (clip && FPDFClipPath_CountPaths(clip) > 0)
+        return {};
+    FS_MATRIX matrix{};
+    float width = 0, phase = 0;
+    int fill = -1;
+    FPDF_BOOL stroke = false;
+    unsigned int red = 0, green = 0, blue = 0, alpha = 0;
+    if (!FPDFPageObj_GetMatrix(object, &matrix)
+        || matrix.a != 1 || matrix.b != 0 || matrix.c != 0 || matrix.d != 1
+        || matrix.e != 0 || matrix.f != 0
+        || !FPDFPageObj_GetStrokeWidth(object, &width) || !std::isfinite(width) || width <= 0 || width > 12
+        || !FPDFPageObj_GetDashPhase(object, &phase) || phase != 0
+        || !FPDFPath_GetDrawMode(object, &fill, &stroke) || fill != FPDF_FILLMODE_NONE || !stroke
+        || !FPDFPageObj_GetStrokeColor(object, &red, &green, &blue, &alpha)
+        || red != 0 || green != 0 || blue != 0 || alpha != 255)
+        return {};
+    QJsonArray result{width};
+    for (int index = 0; index < 2; ++index) {
+        const auto segment = FPDFPath_GetPathSegment(object, index);
+        float x = 0, y = 0;
+        if (!segment || FPDFPathSegment_GetType(segment)
+                != (index == 0 ? FPDF_SEGMENT_MOVETO : FPDF_SEGMENT_LINETO)
+            || FPDFPathSegment_GetClose(segment) || !FPDFPathSegment_GetPoint(segment, &x, &y)
+            || !std::isfinite(x) || !std::isfinite(y))
+            return {};
+        result.append(x);
+        result.append(y);
+    }
+    return result;
+}
+
+inline bool underlineSignaturesMatch(const QJsonArray &actual, const QJsonArray &expected)
+{
+    if (actual.size() != 5 || expected.size() != 5)
         return false;
-    const QByteArray bytes = QJsonDocument(QJsonObject{
-        {QStringLiteral("version"), 1}, {QStringLiteral("id"), id},
+    for (int index = 0; index < 5; ++index) {
+        if (!expected[index].isDouble() || !std::isfinite(expected[index].toDouble())
+            || std::abs(actual[index].toDouble() - expected[index].toDouble()) > .025)
+            return false;
+    }
+    return true;
+}
+
+inline bool writeFragment(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const QString &id,
+                           int cell, int index, int count, int start, int length,
+                           const QString &text, const QJsonArray &physical,
+                           const PDFTableCellFormat::Cell *format, bool underline)
+{
+    if (physical.isEmpty() || FPDFPageObj_CountMarks(object) != 0 || (underline && !format))
+        return false;
+    QJsonObject data{
+        {QStringLiteral("version"), format ? 2 : 1}, {QStringLiteral("id"), id},
         {QStringLiteral("cell"), cell}, {QStringLiteral("index"), index},
         {QStringLiteral("count"), count}, {QStringLiteral("start"), start},
         {QStringLiteral("length"), length}, {QStringLiteral("text"), text},
-        {QStringLiteral("signature"), physical}}).toJson(QJsonDocument::Compact);
+        {QStringLiteral("signature"), physical}};
+    if (format) {
+        data.insert(QStringLiteral("role"), underline ? QStringLiteral("underline") : QStringLiteral("text"));
+        data.insert(QStringLiteral("style"), styleObject(PDFTableCellFormat::styleAt(*format, start)));
+    }
+    const QByteArray bytes = QJsonDocument(data).toJson(QJsonDocument::Compact);
     if (bytes.size() > MaximumFragmentBytes)
         return false;
     const auto mark = FPDFPageObj_AddMark(object, MarkName);
     return mark && FPDFPageObjMark_SetBlobParam(document, object, mark, "Data",
         reinterpret_cast<const unsigned char *>(bytes.constData()),
         static_cast<unsigned long>(bytes.size()));
+}
+
+inline bool write(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const QString &id,
+                   int cell, int index, int count, int start, int length,
+                   const QString &text, FontFingerprints &fonts,
+                   const PDFTableCellFormat::Cell *format = nullptr)
+{
+    return writeFragment(document, object, id, cell, index, count, start, length,
+                         text, signature(object, fonts), format, false);
+}
+
+inline bool writeUnderline(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const QString &id,
+                            int cell, int index, int count, int start, int length,
+                            const QString &text, const PDFTableCellFormat::Cell &format)
+{
+    return writeFragment(document, object, id, cell, index, count, start, length,
+                         text, underlineSignature(object), &format, true);
 }
 
 struct Group {
@@ -275,13 +354,18 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
     });
     if (!textPage)
         return false;
-    struct Fragment { int start; int length; int count; int index; };
+    struct Fragment {
+        int start; int length; int count; int index; int objectIndex;
+        bool needsUnderline; bool hasUnderline;
+        QJsonArray physical;
+    };
     QVector<QVector<Fragment>> fragments(rects.size());
     QCryptographicHash fingerprint(QCryptographicHash::Sha256);
     const PDFShapeUtils::CoordinateMapper mapper(page, pageSize);
     const auto children = indexed.children.constFind(metadata.tableId);
     const QVector<IndexedChild> noChildren;
     const auto &records = children == indexed.children.cend() ? noChildren : *children;
+    const bool styled = !metadata.tableCellFormats.isEmpty();
     for (const IndexedChild &record : records) {
         if (cancelled(cancellation))
             return false;
@@ -300,7 +384,7 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
         };
         const int cell = integer("cell"), index = integer("index"), count = integer("count");
         const int start = integer("start"), spanLength = integer("length");
-        if (data.size() != 9 || integer("version") != 1
+        if (data.size() != (styled ? 11 : 9) || integer("version") != (styled ? 2 : 1)
             || cell < 0 || cell >= metadata.tableCellTexts.size()
             || count < 1 || count > PDFTableCellLayout::MaximumCellCharacters
             || index < 0 || index >= count || start < 0 || spanLength < 1
@@ -309,37 +393,90 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
             return false;
         const QString encoded = data.value(QStringLiteral("text")).toString();
         if (encoded != metadata.tableCellTexts[cell].sliced(start, spanLength)
-            || encoded.trimmed().isEmpty())
+            || (!styled && encoded.trimmed().isEmpty()))
             return false;
-        const QJsonArray physical = signature(object, indexed.fonts);
-        if (!signaturesMatch(physical, data.value(QStringLiteral("signature")).toArray()))
-            return false;
-        const unsigned long textBytes = FPDFTextObj_GetText(object, textPage, nullptr, 0);
-        if (textBytes < 2 || textBytes > 2 * (PDFTableCellLayout::MaximumCellCharacters + 1)
-            || textBytes % 2)
-            return false;
-        QVector<FPDF_WCHAR> text(textBytes / 2);
-        if (FPDFTextObj_GetText(object, textPage, text.data(), textBytes) != textBytes
-            || extractedText(QString::fromUtf16(
-                reinterpret_cast<const char16_t *>(text.constData()), text.size() - 1))
-                != extractedText(encoded))
-            return false;
+        bool needsUnderline = false;
+        bool underline = false;
+        if (styled) {
+            const auto &format = metadata.tableCellFormats[cell];
+            const auto style = PDFTableCellFormat::styleAt(format, start);
+            const auto role = data.value(QStringLiteral("role"));
+            if (!role.isString() || (role.toString() != QLatin1String("text")
+                                    && role.toString() != QLatin1String("underline"))
+                || !data.value(QStringLiteral("style")).isObject()
+                || data.value(QStringLiteral("style")).toObject() != styleObject(style))
+                return false;
+            // A physical run cannot silently cover a different semantic face.
+            for (int position = start + 1; position < start + spanLength; ++position) {
+                if (PDFTableCellFormat::styleAt(format, position) != style)
+                    return false;
+            }
+            needsUnderline = style.underline;
+            underline = role.toString() == QLatin1String("underline");
+        }
         const QRectF cellFrame(rects[cell].x() * pageSize.width(),
             rects[cell].y() * pageSize.height(), rects[cell].width() * pageSize.width(),
             rects[cell].height() * pageSize.height());
-        // Ink may extend fractionally beyond the advance box; it must still
-        // remain inside the cell's three-point padding and grid perimeter.
         const QRectF safeFrame = cellFrame.adjusted(-2.5, -2.5, 2.5, 2.5);
-        for (int x : {6, 8}) {
-            for (int y : {7, 9}) {
-                QPointF display;
-                if (!mapper.devicePoint(QPointF(physical[x].toDouble(), physical[y].toDouble()), display)
-                    || !safeFrame.contains(display))
-                    return false;
+        QJsonArray physical;
+        if (underline) {
+            physical = underlineSignature(object);
+            if (!needsUnderline || fragments[cell].isEmpty()
+                || !underlineSignaturesMatch(physical, data.value(QStringLiteral("signature")).toArray()))
+                return false;
+            auto &part = fragments[cell].last();
+            if (!part.needsUnderline || part.hasUnderline || part.objectIndex + 1 != objectIndex
+                || part.start != start || part.length != spanLength || part.index != index || part.count != count)
+                return false;
+            QPointF first, last, baseline;
+            if (!mapper.devicePoint(QPointF(physical[1].toDouble(), physical[2].toDouble()), first)
+                || !mapper.devicePoint(QPointF(physical[3].toDouble(), physical[4].toDouble()), last)
+                || !mapper.devicePoint(QPointF(part.physical[4].toDouble(), part.physical[5].toDouble()), baseline)
+                || !safeFrame.contains(first) || !safeFrame.contains(last)
+                || last.x() <= first.x() || std::abs(first.y() - last.y()) > .05
+                || std::abs(first.x() - baseline.x()) > .05
+                || std::abs(first.y() - baseline.y() - 1.2) > .05
+                || std::abs(physical[0].toDouble() - mapper.strokeWidth(.6)) > .025)
+                return false;
+            part.hasUnderline = true;
+        } else {
+            physical = signature(object, indexed.fonts);
+            if (!signaturesMatch(physical, data.value(QStringLiteral("signature")).toArray()))
+                return false;
+            const unsigned long textBytes = FPDFTextObj_GetText(object, textPage, nullptr, 0);
+            if (textBytes < 2 || textBytes > 2 * (PDFTableCellLayout::MaximumCellCharacters + 1)
+                || textBytes % 2)
+                return false;
+            QVector<FPDF_WCHAR> text(textBytes / 2);
+            if (FPDFTextObj_GetText(object, textPage, text.data(), textBytes) != textBytes)
+                return false;
+            const QString decoded = QString::fromUtf16(
+                reinterpret_cast<const char16_t *>(text.constData()), text.size() - 1);
+            // PDFium can omit all U+0020 glyphs from a rotated text object's
+            // extracted view. Its validated font, matrix, advance and zero-ink
+            // bounds still identify this mandatory child; coverage below must
+            // continue rejecting missing space/underline objects.
+            const bool omittedSpaces = styled && decoded.isEmpty()
+                && std::all_of(encoded.cbegin(), encoded.cend(), [](QChar character) {
+                    return character == QLatin1Char(' ');
+                })
+                && (std::abs(physical[8].toDouble() - physical[6].toDouble()) < .001
+                    || std::abs(physical[9].toDouble() - physical[7].toDouble()) < .001);
+            if (!omittedSpaces && extractedText(decoded) != extractedText(encoded))
+                return false;
+            // Ink may extend fractionally beyond the advance box, within padding.
+            for (int x : {6, 8}) {
+                for (int y : {7, 9}) {
+                    QPointF display;
+                    if (!mapper.devicePoint(QPointF(physical[x].toDouble(), physical[y].toDouble()), display)
+                        || !safeFrame.contains(display))
+                        return false;
+                }
             }
+            fragments[cell].append({start, spanLength, count, index, objectIndex,
+                                    needsUnderline, false, physical});
         }
-        fragments[cell].append({start, spanLength, count, index});
-        if (group.objectPaths.size() >= PDFTableCellLayout::MaximumTableCharacters)
+        if (group.objectPaths.size() >= 2 * PDFTableCellLayout::MaximumTableCharacters)
             return false;
         group.objectPaths.append(QVector<int>{objectIndex});
         fingerprint.addData(QByteArray::number(objectIndex));
@@ -354,15 +491,25 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
             return left.index < right.index;
         });
         const QString &text = metadata.tableCellTexts[cell];
+        const auto allowedGap = [&metadata](const QString &gap) {
+            if (metadata.tableCellFormats.isEmpty())
+                return gap.trimmed().isEmpty();
+            // v5 owns spaces as well as visible glyphs: removing an underlined
+            // spaces-only fragment must not leave an apparently valid table.
+            return std::all_of(gap.cbegin(), gap.cend(), [](QChar character) {
+                return character == QLatin1Char('\n');
+            });
+        };
         int covered = 0;
         for (int index = 0; index < parts.size(); ++index) {
             const Fragment &part = parts[index];
-            if (part.count != parts.size() || part.index != index || part.start < covered
-                || !text.sliced(covered, part.start - covered).trimmed().isEmpty())
+            if (part.needsUnderline != part.hasUnderline
+                || part.count != parts.size() || part.index != index || part.start < covered
+                || !allowedGap(text.sliced(covered, part.start - covered)))
                 return false;
             covered = part.start + part.length;
         }
-        if (!text.sliced(covered).trimmed().isEmpty())
+        if (!allowedGap(text.sliced(covered)))
             return false;
     }
     group.fingerprint = fingerprint.result();

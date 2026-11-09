@@ -557,6 +557,13 @@ private slots:
     void addsTableWithAtomicHistory();
     void editsTableDividersWithAtomicHistory();
     void editsTableCellsWithAtomicHistory();
+    void editsTableCellFormatsWithAtomicHistory();
+    void rejectsInvalidTableCellFormats();
+    void savesFormattedTableCellsRoundTrip_data();
+    void savesFormattedTableCellsRoundTrip();
+    void savesUnderlinedTableSpaces();
+    void rejectsTamperedTableCellFormatting_data();
+    void rejectsTamperedTableCellFormatting();
     void rejectsInvalidTableCellEdits();
     void savesTableCellsRoundTrip_data();
     void savesTableCellsRoundTrip();

@@ -19,6 +19,9 @@ Item {
     property var tableColumnStops: []
     property var tableCellTexts: []
     property var tableCellRects: []
+    property var tableCellFormats: []
+    property PDFEditController tableTextController: null
+    property string tableTextFamily: ""
     property font tableTextFont: Qt.font({ pixelSize: 12 })
     property real tableTextScale: 1
 
@@ -112,21 +115,51 @@ Item {
             && root.tableCellTexts.length === root.tableCellRects.length
             ? root.tableCellTexts.length : 0
 
-        delegate: Text {
+        delegate: TextEdit {
+            id: cellPreview
             required property int index
             readonly property rect cellRect: root.tableCellRects[index]
+            readonly property string semanticText: root.tableCellTexts[index]
+            readonly property var cellFormat: root.tableCellFormats.length > index
+                ? root.tableCellFormats[index] : ({})
+            property bool initialized: false
             objectName: "tableCellPreview" + index
             x: cellRect.x * root.width
             y: cellRect.y * root.height + root.tableTextScale
             width: cellRect.width * root.width / Math.max(0.01, root.tableTextScale)
             scale: root.tableTextScale
             transformOrigin: Item.TopLeft
-            text: root.tableCellTexts[index]
-            textFormat: Text.PlainText
-            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            textFormat: TextEdit.PlainText
+            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
             font: root.tableTextFont
             color: "#000000"
+            readOnly: true
+            enabled: false
+            activeFocusOnPress: false
+            visible: semanticText.length > 0
             Accessible.ignored: true
+
+            function refresh() {
+                if (!initialized)
+                    return
+                if (!root.tableTextController || semanticText.length === 0) {
+                    text = semanticText
+                    return
+                }
+                const family = root.tableTextFamily || root.tableTextFont.family
+                const plainStyle = { family: family, bold: false, italic: false, underline: false }
+                const plain = { defaultStyle: plainStyle, spans: [{ start: 0,
+                    length: semanticText.length, family: family, bold: false, italic: false,
+                    underline: false }] }
+                root.tableTextController.initializeTableCellEditor(textDocument,
+                    semanticText, cellFormat.defaultStyle ? cellFormat : plain, {})
+            }
+            onSemanticTextChanged: refresh()
+            onCellFormatChanged: refresh()
+            Component.onCompleted: {
+                initialized = true
+                refresh()
+            }
         }
     }
 

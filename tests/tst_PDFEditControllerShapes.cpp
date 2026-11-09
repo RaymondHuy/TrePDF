@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPointer>
+#include <QQuickTextDocument>
 #include <QTranslator>
 
 using namespace PDFEditControllerTestSupport;
@@ -1128,7 +1129,31 @@ bool tamperTableCellObject(const QString &sourcePath, const QString &targetPath,
     }
     if (!cell)
         return false;
-    if (change == QLatin1String("missing-fragment")) {
+    if (change == QLatin1String("missing-underline") || change == QLatin1String("moved-underline")
+        || change == QLatin1String("missing-space-pair")) {
+        FPDF_PAGEOBJECT underline = nullptr;
+        for (int index = 1; index < FPDFPage_CountObjects(page); ++index) {
+            const auto object = FPDFPage_GetObject(page, index);
+            if (FPDFPageObj_GetType(object) == FPDF_PAGEOBJ_PATH && FPDFPageObj_CountMarks(object) == 1) {
+                underline = object;
+                break;
+            }
+        }
+        if (!underline)
+            return false;
+        if (change != QLatin1String("moved-underline")) {
+            if (!FPDFPage_RemoveObject(page, underline))
+                return false;
+            FPDFPageObj_Destroy(underline);
+            if (change == QLatin1String("missing-space-pair")) {
+                if (!FPDFPage_RemoveObject(page, cell))
+                    return false;
+                FPDFPageObj_Destroy(cell);
+            }
+        } else {
+            FPDFPageObj_Transform(underline, 1, 0, 0, 1, 20, 0);
+        }
+    } else if (change == QLatin1String("missing-fragment")) {
         if (!FPDFPage_RemoveObject(page, cell))
             return false;
         FPDFPageObj_Destroy(cell);
@@ -1454,6 +1479,271 @@ void PDFEditControllerTest::rejectsInvalidTableDividers()
     QVERIFY(candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape")).isEmpty());
     QCOMPARE(inspectShapePaths(tampered).count, 1);
     QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::editsTableCellFormatsWithAtomicHistory()
+{
+    using namespace PDFTableCellFormat;
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("cell-format-history.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    const Style regular{testFontFamily()};
+    const QString text = QStringLiteral("Plain Bold Italic Under");
+    const Cell format{regular, {{0, 6, regular}, {6, 5, {regular.family, true}},
+        {11, 7, {regular.family, false, true}}, {18, 5, {regular.family, false, false, true}}}};
+    const auto formats = [&] { return controller.selectedDraftPreview().value(QStringLiteral("tableCellFormats")).toList(); };
+    const QVariantMap expected = toVariant(format);
+    const QString error = controller.setSelectedTableCellContent(0, 0, text, expected);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(formats(), QVariantList{expected});
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, text, expected).isEmpty());
+    controller.undo(); // Text and all range formatting form one document command.
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().isEmpty());
+    QVERIFY(formats().isEmpty());
+    controller.redo();
+    QCOMPARE(formats(), QVariantList{expected});
+    Cell changed = format;
+    changed.spans[0].style.underline = true;
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(changed)).isEmpty());
+    QCOMPARE(formats(), QVariantList{toVariant(changed)});
+    controller.undo();
+    QCOMPARE(formats(), QVariantList{expected});
+    controller.undo();
+    controller.undo(); // Identical formatting did not append a hidden history entry.
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::rejectsInvalidTableCellFormats()
+{
+    using namespace PDFTableCellFormat;
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("cell-format-invalid.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    const QString text = QStringLiteral("Bounded text");
+    const Cell validFormat = plain(text, {testFontFamily(), true, true, true});
+    const auto reject = [&](const QVariantMap &map) {
+        return !controller.setSelectedTableCellContent(0, 0, text, map).isEmpty();
+    };
+    for (const QString &key : {QStringLiteral("start"), QStringLiteral("length"), QStringLiteral("bold")}) {
+        QVariantMap map = toVariant(validFormat);
+        QVariantList spans = map.value(QStringLiteral("spans")).toList();
+        QVariantMap span = spans.first().toMap();
+        span[key] = key == QLatin1String("bold") ? QVariant(QStringLiteral("true")) : QVariant(.5);
+        spans[0] = span;
+        map[QStringLiteral("spans")] = spans;
+        QVERIFY2(reject(map), qPrintable(key));
+    }
+    Cell gap = validFormat;
+    gap.spans[0].start = 1;
+    QVERIFY(reject(toVariant(gap)));
+    Cell overlap = validFormat;
+    overlap.spans.append(validFormat.spans.first());
+    QVERIFY(reject(toVariant(overlap)));
+    Cell missingFace = plain(text, {QStringLiteral("TrePDFNoSuchTableFont"), true});
+    QVERIFY(reject(toVariant(missingFace)));
+    const QString regularOnly = QStringLiteral("TrePDFTableRegularOnly");
+    QString fontError;
+    QVERIFY2(ApplicationFonts::installDownloadedFont(renamedTestFontData(regularOnly, false, false),
+        regularOnly, false, false, uint('a'), fontError), qPrintable(fontError));
+    QVERIFY(reject(toVariant(plain(text, {regularOnly, true}))));
+    const QString overflow = QStringLiteral("line\n").repeated(70);
+    QVERIFY(!controller.setSelectedTableCellContent(0, 0, overflow,
+        toVariant(plain(overflow, {testFontFamily(), true}))).isEmpty());
+    const QString surrogate = QString::fromUcs4(U"\U0001F600");
+    Cell split{{testFontFamily()}, {{0, 1, {testFontFamily()}}, {1, 1, {testFontFamily(), true}}}};
+    QVERIFY(!controller.setSelectedTableCellContent(0, 0, surrogate, toVariant(split)).isEmpty());
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().isEmpty());
+    controller.undo();
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::savesFormattedTableCellsRoundTrip_data()
+{
+    QTest::addColumn<int>("rotation");
+    for (int rotation = 0; rotation < 4; ++rotation)
+        QTest::newRow(qPrintable(QString::number(rotation * 90))) << rotation;
+}
+
+void PDFEditControllerTest::savesFormattedTableCellsRoundTrip()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(int, rotation);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("formatted-cell-%1.pdf").arg(rotation));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("formatted-cell-saved-%1.pdf").arg(rotation));
+    QVERIFY(createTableTestPage(path, rotation));
+    const QString alternate = QStringLiteral("TrePDFTableAlternate");
+    QString fontError;
+    QVERIFY2(ApplicationFonts::installDownloadedFont(renamedTestFontData(alternate, false, true),
+        alternate, false, true, uint('a'), fontError), qPrintable(fontError));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    const QString text = QStringLiteral("Plain Bold Italic Under");
+    const Style regular{testFontFamily()};
+    const Cell format{regular, {{0, 6, regular}, {6, 5, {regular.family, true}},
+        {11, 7, {alternate, false, true}}, {18, 5, {regular.family, false, false, true}}}};
+    const Cell empty{{regular.family, true, true, true}, {}};
+    const QString error = controller.setSelectedTableCellContent(0, 0, text, toVariant(format));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(controller.setSelectedTableCellContent(1, 0, QString(), toVariant(empty)).isEmpty());
+    const QVariantList expected{toVariant(format), toVariant(empty)};
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(readTableTestMetadata(saved).value(QStringLiteral("version")).toInt(), 5);
+    QVERIFY(inspectShapePaths(saved).count > 1); // Grid plus a real vector underline.
+    QVERIFY(pageText(saved).contains(text));
+    const auto bold = textObjectFontInfo(saved, QStringLiteral("Bold"));
+    QVERIFY(bold.found);
+    QVERIFY(bold.weight >= 600);
+    QCOMPARE(bold.embedded, 1);
+    const auto italic = textObjectFontInfo(saved, QStringLiteral("Italic"));
+    QVERIFY(italic.found);
+    QVERIFY(italic.italic);
+    QCOMPARE(italic.familyName, alternate);
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    auto candidates = waitForCandidates(reopened, 0);
+    auto table = candidateForKind(candidates, QStringLiteral("sourceShape"));
+    QVERIFY2(!table.isEmpty(), "A rich table and its underline children must rehydrate together.");
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList(), expected);
+    for (const auto &candidate : candidates) {
+        if (candidate.toMap().value(QStringLiteral("objectId")) != table.value(QStringLiteral("objectId")))
+            QVERIFY(!candidate.toMap().value(QStringLiteral("editable")).toBool());
+    }
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    reopened.beginSelectedFrameResize();
+    reopened.updateSelectedTableDivider(false, 0, .55);
+    reopened.updateSelectedFrameRect(QRectF(.12, .12, .75, .75));
+    reopened.finishSelectedFrameResize();
+    QVERIFY(reopened.save());
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList(), expected);
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    const QString changed = QStringLiteral("Changed");
+    QVERIFY(reopened.setSelectedTableCellContent(0, 0, changed, toVariant(plain(changed, regular))).isEmpty());
+    QVERIFY(reopened.save());
+    QCOMPARE(inspectShapePaths(saved).count, 1); // No orphan underline from previous content.
+    QVERIFY(pageText(saved).contains(changed));
+    QVERIFY(!pageText(saved).contains(QStringLiteral("Under")));
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList().at(1).toMap(), toVariant(empty));
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    reopened.deleteSelectedObject();
+    reopened.undo();
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(reopened.selectedDraftPreview().value(QStringLiteral("tableCellFormats")).toList().at(1).toMap(), toVariant(empty));
+    reopened.deleteSelectedObject();
+    QVERIFY(reopened.save());
+    QCOMPARE(topLevelPageObjectCount(saved), 0);
+    QVERIFY(pageText(saved).trimmed().isEmpty());
+}
+
+void PDFEditControllerTest::savesUnderlinedTableSpaces()
+{
+    using namespace PDFTableCellFormat;
+    for (int rotation = 0; rotation < 4; ++rotation) {
+        const QString path = m_temporaryDirectory.filePath(QStringLiteral("space-cell-%1.pdf").arg(rotation));
+        const QString saved = m_temporaryDirectory.filePath(QStringLiteral("space-cell-saved-%1.pdf").arg(rotation));
+        QVERIFY(createTableTestPage(path, rotation));
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(path)));
+        controller.setDocument(&document);
+        controller.setShapeType(PDFEditController::TableShape);
+        controller.setTableRows(1);
+        controller.setTableColumns(1);
+        QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+        const QString text = QStringLiteral("   ");
+        const Cell format = plain(text, {testFontFamily(), false, false, true});
+        QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(format)).isEmpty());
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+        QCOMPARE(inspectShapePaths(saved).count, 2); // Grid plus visible underline under spaces.
+        auto table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+        QVERIFY2(!table.isEmpty(), qPrintable(QStringLiteral("space-only group, rotation %1").arg(rotation)));
+        QCOMPARE(table.value(QStringLiteral("tableCellTexts")).toStringList(), QStringList{text});
+        QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList(), QVariantList{toVariant(format)});
+        QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+        controller.deleteSelectedObject();
+        QVERIFY(controller.save());
+        QCOMPARE(topLevelPageObjectCount(saved), 0);
+    }
+}
+
+void PDFEditControllerTest::rejectsTamperedTableCellFormatting_data()
+{
+    QTest::addColumn<QString>("change");
+    for (const auto &change : {QStringLiteral("missing-underline"), QStringLiteral("moved-underline"),
+                              QStringLiteral("format-disagrees"), QStringLiteral("malformed-format"),
+                              QStringLiteral("missing-space-pair")})
+        QTest::newRow(qPrintable(change)) << change;
+}
+
+void PDFEditControllerTest::rejectsTamperedTableCellFormatting()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(QString, change);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("formatted-valid-%1.pdf").arg(change));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("formatted-saved-%1.pdf").arg(change));
+    const QString tampered = m_temporaryDirectory.filePath(QStringLiteral("formatted-tampered-%1.pdf").arg(change));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    const QString text = change == QLatin1String("missing-space-pair")
+        ? QStringLiteral("   ") : QStringLiteral("Underlined");
+    const Cell format = plain(text, {testFontFamily(), false, false, true});
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(format)).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    if (change.endsWith(QLatin1String("underline")) || change == QLatin1String("missing-space-pair")) {
+        QVERIFY(tamperTableCellObject(saved, tampered, change));
+    } else {
+        QVariantMap altered = toVariant(format);
+        QVariantList spans = altered.value(QStringLiteral("spans")).toList();
+        QVariantMap span = spans.first().toMap();
+        if (change == QLatin1String("format-disagrees"))
+            span[QStringLiteral("underline")] = false;
+        else
+            span[QStringLiteral("length")] = text.size() + 1;
+        spans[0] = span;
+        altered[QStringLiteral("spans")] = spans;
+        QVERIFY(rewriteTableTestMetadata(saved, tampered, QStringLiteral("cellFormats"), QVariantList{altered}));
+    }
+    QVERIFY(document.open(QUrl::fromLocalFile(tampered)));
+    const auto candidates = waitForCandidates(controller, 0);
+    QVERIFY(candidateForKind(candidates, QStringLiteral("sourceShape")).isEmpty());
+    for (const auto &candidate : candidates)
+        QVERIFY(!candidate.toMap().value(QStringLiteral("editable")).toBool());
+    if (change == QLatin1String("missing-space-pair"))
+        QVERIFY(pageText(tampered).trimmed().isEmpty());
+    else
+        QVERIFY(pageText(tampered).contains(text));
 }
 
 void PDFEditControllerTest::editsTableCellsWithAtomicHistory()
@@ -2169,12 +2459,30 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
         auto *input = itemNamed(QStringLiteral("tableCellTextInput"));
         return input && input->isVisible();
     };
+    const auto cellPanel = [&] {
+        return itemNamed(QStringLiteral("tableCellPropertiesPanel"));
+    };
+    const auto cellPanelVisible = [&] {
+        auto *panel = cellPanel();
+        return panel && panel->isVisible();
+    };
     const auto currentCellTexts = [&] {
         return controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList();
     };
     QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
     QTRY_VERIFY((cellEditor = itemNamed(QStringLiteral("tableCellInlineEditor"))) && cellEditor->isVisible());
     QVERIFY(!itemNamed(QStringLiteral("tableCellDialog")));
+    QTRY_VERIFY(cellPanelVisible());
+    const auto *selectionProperties = itemNamed(QStringLiteral("selectionPropertiesColumn"));
+    QVERIFY(selectionProperties);
+    QTRY_VERIFY(!selectionProperties->isVisible());
+    QQuickItem *documentView = itemNamed(QStringLiteral("primaryDocumentView"));
+    QVERIFY(documentView);
+    QTRY_VERIFY(cellPanel()->mapToScene(QPointF(0, 0)).x()
+                >= documentView->mapToScene(QPointF(documentView->width(), 0)).x() - 1);
+    QVERIFY(!cellPanel()->isAncestorOf(cellInput));
+    auto *cellFontBox = itemNamed(QStringLiteral("tableCellFontBox"));
+    QVERIFY(cellFontBox && cellPanel()->isAncestorOf(cellFontBox));
     const QRectF firstCellInOverlay(tableFrame.left() * overlay->width(),
         tableFrame.top() * overlay->height(), tableFrame.width() * overlay->width() / 4,
         tableFrame.height() * overlay->height() / 3);
@@ -2183,9 +2491,11 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QVERIFY2(firstCellInOverlay.adjusted(-2, -2, 2, 2).contains(inputRect),
              "Cell input must be inside the table cell, not in a separate dialog.");
     QVERIFY(cellInput->setProperty("text", QStringLiteral("Cancelled input")));
-    cellInput->forceActiveFocus();
-    QTest::keyClick(window, Qt::Key_Escape);
+    auto *cellCancelButton = itemNamed(QStringLiteral("tableCellCancelButton"));
+    QVERIFY(cellCancelButton && cellPanel()->isAncestorOf(cellCancelButton));
+    clickItem(cellCancelButton);
     QTRY_VERIFY(!cellInputVisible());
+    QTRY_VERIFY(!cellPanelVisible());
     QVERIFY(!controller.hasDrafts());
 
     QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
@@ -2207,15 +2517,17 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QVERIFY(firstCellInOverlay.adjusted(-2, -2, 2, 2).contains(
         cellEditor->mapToItem(overlay, QPointF(0, 0))));
     QVERIFY(!controller.hasDrafts()); // Invalid input must not advance to another cell.
-    QQuickItem *opacitySlider = nullptr;
-    QTRY_VERIFY((opacitySlider = itemNamed(QStringLiteral("drawingOpacitySlider")))
-                && opacitySlider->isVisible() && opacitySlider->isEnabled());
-    clickItem(opacitySlider);
+    QTRY_VERIFY(cellPanelVisible());
+    QVERIFY(cellPanel()->isAncestorOf(cellError));
+    QVERIFY(!itemNamed(QStringLiteral("drawingOpacitySlider")));
+    auto *cellApplyButton = itemNamed(QStringLiteral("tableCellApplyButton"));
+    QVERIFY(cellApplyButton && cellPanel()->isAncestorOf(cellApplyButton));
+    clickItem(cellApplyButton);
     QTRY_VERIFY(cellInputVisible());
+    QTRY_VERIFY(cellPanelVisible());
     QCOMPARE(cellInput->property("text").toString(), oversized);
     QCOMPARE(controller.selectedDrawingOpacity(), 1.0);
-    QTRY_COMPARE(opacitySlider->property("value").toDouble(), 100.0);
-    QVERIFY(!controller.hasDrafts()); // A property edit must not discard invalid pending text.
+    QVERIFY(!controller.hasDrafts()); // Applying invalid text keeps the panel and input available.
     QTest::keySequence(window, QKeySequence(QKeySequence::Save));
     QTRY_VERIFY(cellInputVisible());
     QVERIFY(!controller.saving());
@@ -2241,12 +2553,21 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     // Recycling the page only destroys its editor view. Pending text belongs
     // to the workspace and must be restored when the page is visible again.
     const QPointer<QQuickItem> pooledInput = cellInput;
+    const QPointer<QQuickItem> retainedPanel = cellPanel();
     QVERIFY(overlay->setProperty("pooled", true));
     QTRY_VERIFY(!cellInputVisible());
     QTRY_VERIFY(pooledInput.isNull());
+    QVERIFY(!retainedPanel.isNull());
+    QVERIFY(cellPanelVisible()); // Workspace-owned controls outlive the page delegate.
+    QCOMPARE(cellPanel(), retainedPanel.data());
+    auto *revealCellButton = itemNamed(QStringLiteral("tableCellRevealButton"));
+    QVERIFY(revealCellButton && revealCellButton->isVisible() && revealCellButton->isEnabled());
+    QVERIFY(!itemNamed(QStringLiteral("tableCellFontBox"))->isEnabled());
     QVERIFY(!controller.hasDrafts());
     QVERIFY(overlay->setProperty("pooled", false));
     QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QTRY_VERIFY(!revealCellButton->isVisible());
+    QVERIFY(itemNamed(QStringLiteral("tableCellFontBox"))->isEnabled());
     QCOMPARE(cellInput->property("text").toString(), cellText);
     QTRY_VERIFY(cellInput->hasActiveFocus());
     if (!screenshotPrefix.isEmpty()) {
@@ -2256,6 +2577,7 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QTest::keyClick(window, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(controller.hasDrafts());
     QTRY_VERIFY(!cellInputVisible());
+    QTRY_VERIFY(!cellPanelVisible());
     QCOMPARE(currentCellTexts().at(0), cellText);
     QQuickItem *cellPreview = nullptr;
     QTRY_VERIFY((cellPreview = itemNamed(QStringLiteral("tableCellPreview0"))) && cellPreview->isVisible());
@@ -2340,14 +2662,124 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     controller.undo();
     QVERIFY(!controller.hasDrafts());
 
-    // Property changes commit pending cell text before starting their own undo step.
+    // Range formatting preserves the selection through toolbar interaction;
+    // caret formatting affects only subsequently inserted text.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Range text")));
+    QVERIFY(QMetaObject::invokeMethod(cellInput, "select", Q_ARG(int, 0), Q_ARG(int, 10)));
+    QQuickItem *fontBox = itemNamed(QStringLiteral("tableCellFontBox"));
+    QVERIFY(fontBox);
+    int fixtureIndex = -1;
+    for (int index = 0; index < fontBox->property("count").toInt(); ++index) {
+        QString family;
+        QVERIFY(QMetaObject::invokeMethod(fontBox, "textAt", Q_RETURN_ARG(QString, family), Q_ARG(int, index)));
+        if (family == testFontFamily()) {
+            fixtureIndex = index;
+            break;
+        }
+    }
+    QVERIFY(fixtureIndex >= 0);
+    QVERIFY(fontBox->setProperty("currentIndex", fixtureIndex));
+    QVERIFY(QMetaObject::invokeMethod(fontBox, "activated", Q_ARG(int, fixtureIndex)));
+    QVERIFY(QMetaObject::invokeMethod(cellInput, "select", Q_ARG(int, 0), Q_ARG(int, 5)));
+    for (const auto &name : {QStringLiteral("tableCellBoldButton"), QStringLiteral("tableCellItalicButton"),
+                             QStringLiteral("tableCellUnderlineButton")}) {
+        QQuickItem *button = itemNamed(name);
+        QVERIFY(button && button->isEnabled());
+        clickItem(button);
+    }
+    const auto inlineState = [&] {
+        return controller.tableCellEditorState(cellInput->property("textDocument").value<QQuickTextDocument *>());
+    };
+    const auto inlineFormat = [&] {
+        PDFTableCellFormat::Cell format;
+        const auto snapshot = inlineState();
+        const bool valid = PDFTableCellFormat::fromVariant(snapshot.value(QStringLiteral("format")).toMap(),
+            snapshot.value(QStringLiteral("text")).toString(), format);
+        return valid ? format : PDFTableCellFormat::Cell{};
+    };
+    QTRY_VERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 0).bold);
+    QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 0).italic);
+    QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 0).underline);
+    QCOMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 0).family, testFontFamily());
+    QVERIFY(!PDFTableCellFormat::styleAt(inlineFormat(), 6).bold);
+    QVERIFY(!PDFTableCellFormat::styleAt(inlineFormat(), 6).italic);
+    QVERIFY(!PDFTableCellFormat::styleAt(inlineFormat(), 6).underline);
+    QCOMPARE(cellInput->property("selectionStart").toInt(), 0);
+    QCOMPARE(cellInput->property("selectionEnd").toInt(), 5);
+    QTest::keySequence(window, QKeySequence(QKeySequence::Undo));
+    QTRY_VERIFY(!PDFTableCellFormat::styleAt(inlineFormat(), 0).underline);
+    QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 0).bold);
+    QVERIFY(!controller.hasDrafts());
+    QTest::keySequence(window, QKeySequence(QKeySequence::Redo));
+    QTRY_VERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 0).underline);
+    QVERIFY(QMetaObject::invokeMethod(cellInput, "select", Q_ARG(int, 10), Q_ARG(int, 10)));
+    QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_U, Qt::ControlModifier);
+    QTest::keyClick(window, Qt::Key_Exclam);
+    QTRY_COMPARE(cellInput->property("text").toString(), QStringLiteral("Range text!"));
+    QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 10).bold);
+    QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 10).italic);
+    QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 10).underline);
+    QVERIFY(!PDFTableCellFormat::styleAt(inlineFormat(), 6).bold);
+    const QVariantMap formattedSnapshot = inlineState().value(QStringLiteral("format")).toMap();
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-cell-formatted.png")));
+    }
+    QVERIFY(overlay->setProperty("pooled", true));
+    QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(overlay->setProperty("pooled", false));
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QTRY_COMPARE(inlineState().value(QStringLiteral("format")).toMap(), formattedSnapshot);
+    QCOMPARE(cellInput->property("cursorPosition").toInt(), 11);
+    cellInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(!cellInputVisible());
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableCellFormats")).toList().first().toMap(), formattedSnapshot);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+
+    // A rejected pending edit must retain all styles when its delegate recycles.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    const QString complexText(258, QLatin1Char('x'));
+    PDFTableCellFormat::Cell complexFormat{{testFontFamily()}, {}};
+    for (int index = 0; index < complexText.size(); ++index)
+        complexFormat.spans.append({index, 1, {testFontFamily(), index % 2 != 0, false, false}});
+    controller.initializeTableCellEditor(cellInput->property("textDocument").value<QQuickTextDocument *>(),
+        complexText, PDFTableCellFormat::toVariant(complexFormat), {});
+    cellInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(cellInputVisible());
+    QVERIFY(!controller.hasDrafts());
+    const QVariantMap complexSnapshot = inlineState().value(QStringLiteral("format")).toMap();
+    QCOMPARE(complexSnapshot.value(QStringLiteral("spans")).toList().size(), 258);
+    QVERIFY(overlay->setProperty("pooled", true));
+    QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(overlay->setProperty("pooled", false));
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QTRY_COMPARE(inlineState().value(QStringLiteral("format")).toMap(), complexSnapshot);
+    QTRY_VERIFY(cellInput->hasActiveFocus());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(!controller.hasDrafts());
+
+    // Applying the cell restores shape properties; their edits keep a separate undo step.
     QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
     QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
     QVERIFY(cellInput->setProperty("text", QStringLiteral("Panel transition")));
+    QTRY_VERIFY((cellApplyButton = itemNamed(QStringLiteral("tableCellApplyButton")))
+                && cellApplyButton->isVisible() && cellApplyButton->isEnabled());
+    clickItem(cellApplyButton);
+    QTRY_VERIFY(!cellInputVisible());
+    QTRY_VERIFY(!cellPanelVisible());
+    QQuickItem *opacitySlider = nullptr;
     QTRY_VERIFY((opacitySlider = itemNamed(QStringLiteral("drawingOpacitySlider")))
                 && opacitySlider->isVisible() && opacitySlider->isEnabled());
     clickItem(opacitySlider);
-    QTRY_VERIFY(!cellInputVisible());
     QTRY_VERIFY(controller.selectedDrawingOpacity() < 1.0);
     QCOMPARE(currentCellTexts().at(0), QStringLiteral("Panel transition"));
     controller.undo();

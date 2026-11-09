@@ -129,7 +129,7 @@ Item {
             || kind === "ink"
     }
     readonly property bool drawingCommentPropertiesPanelActive:
-        (editTabActive || headerSelectionActive) && (drawingCommentSelected
+        !hasPendingTableCellEdit && (editTabActive || headerSelectionActive) && (drawingCommentSelected
             || session.editController.selectedKind === "addedShape"
             || session.editController.selectedKind === "sourceShape")
     readonly property bool imagePropertiesPanelActive:
@@ -1023,6 +1023,26 @@ Item {
         }
 
         Loader {
+            id: tableCellPanelLoader
+
+            Layout.preferredWidth: active ? 264 : 0
+            Layout.fillHeight: true
+            active: root.session.document.loaded && root.hasPendingTableCellEdit
+            visible: active
+
+            sourceComponent: Component {
+                TableCellPanel {
+                    theme: root.theme
+                    editingState: tableCellEditingState
+                    onRevealCellRequested: {
+                        documentView.navigateToPage(tableCellEditingState.page)
+                        tableCellEditingState.focusRequested()
+                    }
+                }
+            }
+        }
+
+        Loader {
             id: drawingCommentPropertiesPanelLoader
 
             Layout.preferredWidth: active
@@ -1120,6 +1140,7 @@ Item {
                 active: root.session.document.loaded
                     && (root.editTabActive || (root.headerSelectionActive
                         && root.session.editController.selectedObjectId.length > 0))
+                    && !root.hasPendingTableCellEdit
                     && !root.textFieldOptionsPanelActive
                     && !root.combFieldOptionsPanelActive
                     && !root.dropdownOptionsPanelActive

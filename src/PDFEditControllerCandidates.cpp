@@ -2508,6 +2508,7 @@ void PDFEditController::appendPageObjectCandidates(
         candidate.tableRowStops = metadata.tableRowStops;
         candidate.tableColumnStops = metadata.tableColumnStops;
         candidate.tableCellTexts = metadata.tableCellTexts;
+        candidate.tableCellFormats = metadata.tableCellFormats;
         candidate.tableFontFamily = metadata.tableFontFamily;
         candidate.tableFontSize = metadata.tableFontSize;
         candidate.tableId = metadata.tableId;

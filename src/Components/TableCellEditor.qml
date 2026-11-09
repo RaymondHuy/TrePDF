@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls.Basic
-import QtQuick.Layouts
 import TrePDF
 
 Item {
@@ -10,8 +9,41 @@ Item {
     required property TableCellEditing editingState
     required property AppTheme theme
     required property real pointScale
+    property int editorGeneration: -1
     readonly property real layoutScale: Math.max(0.01, pointScale)
     readonly property rect normalizedCell: editingState.cellRect
+
+    function synchronize() {
+        if (!input.initialized || input.synchronizing || !editingState.active
+                || editorGeneration !== editingState.focusGeneration)
+            return
+        input.synchronizing = true
+        const snapshot = editingState.controller.tableCellEditorState(input.textDocument)
+        if (snapshot.text !== undefined) {
+            editingState.text = snapshot.text
+            editingState.cellFormat = snapshot.format
+            editingState.editorState = snapshot
+            editingState.fontFamily = snapshot.fontFamily
+            editingState.bold = snapshot.bold
+            editingState.italic = snapshot.italic
+            editingState.underline = snapshot.underline
+        }
+        input.synchronizing = false
+    }
+
+    function applyFormatting(property, value) {
+        if (!editingState.active || editorGeneration !== editingState.focusGeneration)
+            return
+        synchronize()
+        input.synchronizing = true
+        const error = editingState.controller.applyTableCellEditorFormat(
+            input.textDocument, property, value)
+        input.synchronizing = false
+        synchronize()
+        editingState.errorText = error
+        input.forceActiveFocus()
+        textViewport.revealCursor()
+    }
 
     MouseArea {
         anchors.fill: parent
@@ -64,6 +96,8 @@ Item {
             TextArea {
                 id: input
                 objectName: "tableCellTextInput"
+                property bool initialized: false
+                property bool synchronizing: false
                 width: textViewport.width
                 height: Math.max(textViewport.height, contentHeight)
                 padding: 0
@@ -74,26 +108,60 @@ Item {
                 textFormat: TextEdit.PlainText
                 wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
                 selectByMouse: true
-                font: root.editingState.controller.fontForDisplay(root.editingState.fontFamily,
+                persistentSelection: true
+                font: root.editingState.controller.fontForDisplay(
+                    root.editingState.cellFormat.defaultStyle.family || root.editingState.fontFamily,
                     100, false, false, false, root.editingState.fontSize)
                 //% "Cell text"
                 Accessible.name: qsTrId("TableCellText")
-                text: root.editingState.text
                 onTextChanged: {
-                    if (root.editingState.text !== text) {
-                        root.editingState.text = text
+                    if (initialized && !synchronizing) {
                         root.editingState.errorText = ""
+                        Qt.callLater(root.synchronize)
                     }
                 }
-                onActiveFocusChanged: root.editingState.inputFocused = activeFocus
+                onCursorPositionChanged: Qt.callLater(root.synchronize)
+                onSelectionStartChanged: Qt.callLater(root.synchronize)
+                onSelectionEndChanged: Qt.callLater(root.synchronize)
+                onActiveFocusChanged: {
+                    root.editingState.inputFocused = activeFocus
+                    if (!activeFocus)
+                        root.synchronize()
+                }
                 onCursorRectangleChanged: textViewport.revealCursor()
+                Component.onCompleted: {
+                    text = root.editingState.text
+                    const saved = root.editingState.editorState
+                    const position = Math.min(Number(saved.cursorPosition ?? length), length)
+                    const start = Math.min(Number(saved.selectionStart ?? position), length)
+                    const end = Math.min(Number(saved.selectionEnd ?? position), length)
+                    select(position === start ? end : start, position === start ? start : end)
+                    root.editingState.controller.initializeTableCellEditor(textDocument,
+                        root.editingState.text, root.editingState.cellFormat, saved)
+                    initialized = true
+                    root.synchronize()
+                }
+                Component.onDestruction: {
+                    root.synchronize()
+                    initialized = false
+                }
                 Keys.onShortcutOverride: event => {
                     const command = event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)
                     event.accepted = !(command && (event.key === Qt.Key_S
                         || event.key === Qt.Key_W || event.key === Qt.Key_O || event.key === Qt.Key_F))
                 }
                 Keys.onPressed: event => {
-                    if (event.key === Qt.Key_Escape) {
+                    const command = event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)
+                    if (command && event.key === Qt.Key_B) {
+                        root.applyFormatting("bold", !root.editingState.bold)
+                        event.accepted = true
+                    } else if (command && event.key === Qt.Key_I) {
+                        root.applyFormatting("italic", !root.editingState.italic)
+                        event.accepted = true
+                    } else if (command && event.key === Qt.Key_U) {
+                        root.applyFormatting("underline", !root.editingState.underline)
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Escape) {
                         root.editingState.cancel()
                         event.accepted = true
                     } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
@@ -110,68 +178,16 @@ Item {
         }
     }
 
-    Rectangle {
-        id: actions
-        x: Math.max(0, Math.min(cellFrame.x, root.width - width))
-        y: cellFrame.y + cellFrame.height + height + 4 <= root.height
-            ? cellFrame.y + cellFrame.height + 4 : Math.max(0, cellFrame.y - height - 4)
-        width: Math.min(340, root.width)
-        height: actionLayout.implicitHeight + 16
-        color: root.theme.ribbonSurface
-        border.color: root.theme.ribbonBorder
-        radius: 5
-
-        MouseArea { anchors.fill: parent }
-        ColumnLayout {
-            id: actionLayout
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 6
-            Label {
-                objectName: "tableCellError"
-                Layout.fillWidth: true
-                visible: root.editingState.errorText.length > 0
-                text: root.editingState.errorText
-                color: "#b3261e"
-                wrapMode: Text.Wrap
-                Accessible.role: Accessible.AlertMessage
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: root.editingState.errorText.length === 0
-                //% "Enter: new line · Tab: next cell · Ctrl/Cmd+Enter: finish · Esc: cancel"
-                text: qsTrId("TableCellInlineHint")
-                color: root.theme.ribbonTextColor
-                wrapMode: Text.Wrap
-                font.pixelSize: 11
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                Button {
-                    objectName: "tableCellCancelButton"
-                    //% "Cancel"
-                    text: qsTrId("Cancel")
-                    onClicked: root.editingState.cancel()
-                }
-                Button {
-                    objectName: "tableCellApplyButton"
-                    //% "Apply"
-                    text: qsTrId("TableCellApply")
-                    onClicked: root.editingState.commit()
-                }
-            }
-        }
-    }
-
     function focusInput() {
-        if (root.editingState.active) {
+        if (root.editingState.active && editorGeneration === editingState.focusGeneration) {
             input.forceActiveFocus()
-            input.cursorPosition = input.length
             textViewport.revealCursor()
         }
     }
     Component.onCompleted: {
+        editorGeneration = root.editingState.focusGeneration
         root.editingState.editorItem = root
+        synchronize()
         Qt.callLater(root.focusInput)
     }
     Component.onDestruction: {

@@ -18,12 +18,17 @@ QtObject {
     property int columns: 0
     property string text: ""
     property string errorText: ""
+    property var cellFormat: ({})
+    property var editorState: ({})
+    property bool bold: false
+    property bool italic: false
+    property bool underline: false
     property rect cellRect: Qt.rect(0, 0, 0, 0)
     property string fontFamily: ""
     property real fontSize: 12
     property int focusGeneration: 0
     property bool inputFocused: false
-    property Item editorItem: null
+    property TableCellEditor editorItem: null
 
     signal focusRequested()
 
@@ -54,9 +59,23 @@ QtObject {
         fontFamily = draft.tableFontFamily || controller.headerTextFontFamily()
         fontSize = draft.tableFontSize || 12
         text = (draft.tableCellTexts || [])[index] || ""
+        const formats = draft.tableCellFormats || []
+        const plainStyle = { family: fontFamily, bold: false, italic: false, underline: false }
+        cellFormat = formats.length > index ? formats[index] : {
+            defaultStyle: plainStyle,
+            spans: text.length > 0 ? [{ start: 0, length: text.length,
+                family: fontFamily, bold: false, italic: false, underline: false }] : []
+        }
+        const initialStyle = cellFormat.defaultStyle
+        bold = initialStyle.bold
+        italic = initialStyle.italic
+        underline = initialStyle.underline
+        fontFamily = initialStyle.family
+        editorState = { cursorPosition: text.length, selectionStart: text.length,
+            selectionEnd: text.length, typingPosition: -1 }
         errorText = ""
-        active = true
         ++focusGeneration
+        active = true
         focusRequested()
         return true
     }
@@ -70,6 +89,8 @@ QtObject {
         // qmllint disable missing-property
         Qt.inputMethod.commit()
         // qmllint enable missing-property
+        if (editorItem)
+            editorItem.synchronize()
         submitting = true
         if (controller.selectedPage !== page || controller.selectedObjectId !== objectId) {
             if (!controller.selectCandidate(page, objectId)) {
@@ -80,7 +101,7 @@ QtObject {
                 return false
             }
         }
-        const error = controller.setSelectedTableCellText(row, column, text)
+        const error = controller.setSelectedTableCellContent(row, column, text, cellFormat)
         submitting = false
         if (error.length > 0) {
             errorText = error
@@ -98,6 +119,8 @@ QtObject {
         errorText = ""
         inputFocused = false
         text = ""
+        cellFormat = ({})
+        editorState = ({})
     }
 
     function advance(backward) {
