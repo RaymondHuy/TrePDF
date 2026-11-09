@@ -147,10 +147,11 @@ Item {
                     return
                 }
                 const family = root.tableTextFamily || root.tableTextFont.family
-                const plainStyle = { family: family, bold: false, italic: false, underline: false }
+                const plainStyle = { family: family, bold: false, italic: false,
+                    underline: false, fontSize: root.tableTextFont.pixelSize }
                 const plain = { defaultStyle: plainStyle, spans: [{ start: 0,
                     length: semanticText.length, family: family, bold: false, italic: false,
-                    underline: false }] }
+                    underline: false, fontSize: root.tableTextFont.pixelSize }] }
                 root.tableTextController.initializeTableCellEditor(textDocument,
                     semanticText, cellFormat.defaultStyle ? cellFormat : plain, {})
             }

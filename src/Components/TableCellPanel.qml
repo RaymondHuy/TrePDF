@@ -20,9 +20,11 @@ Rectangle {
     implicitWidth: 264
     color: theme.ribbonSurface
 
-    function applyFormatting(property, value) {
+    function applyFormatting(property, value, restoreFocus = true) {
+        if (property !== "fontSize")
+            fontSizeBox.commitSizeText(false)
         if (editingState.editorItem)
-            editingState.editorItem.applyFormatting(property, value)
+            editingState.editorItem.applyFormatting(property, value, restoreFocus)
     }
 
     Keys.onEscapePressed: event => {
@@ -98,6 +100,119 @@ Rectangle {
                 //% "Font family"
                 Accessible.name: qsTrId("FontFamily")
                 onActivated: index => root.applyFormatting("family", textAt(index))
+            }
+
+            Label {
+                Layout.fillWidth: true
+                //% "Font size"
+                text: qsTrId("FontSize")
+                color: root.theme.ribbonTextColor
+                font.pixelSize: 12
+                font.weight: Font.Medium
+            }
+
+            ComboBox {
+                id: fontSizeBox
+                objectName: "tableCellFontSizeBox"
+                property bool pending: false
+
+                function syncCurrentSize() {
+                    pending = false
+                    const sizeText = String(root.editingState.fontSize)
+                    currentIndex = model.indexOf(sizeText)
+                    editText = sizeText
+                }
+
+                function commitSizeText(restoreFocus = true) {
+                    if (!pending)
+                        return
+                    const entered = editText.trim()
+                    const points = Number(entered)
+                    const apply = root.editingState.active && root.editorAvailable
+                        && /^[0-9]+$/.test(entered) && Number.isInteger(points)
+                        && points >= 1 && points <= 512
+                    pending = false
+                    if (apply)
+                        root.applyFormatting("fontSize", points, restoreFocus)
+                    syncCurrentSize()
+                }
+
+                Layout.fillWidth: true
+                enabled: root.editorAvailable
+                editable: true
+                model: ["8", "9", "10", "11", "12", "14", "16", "18", "24", "36", "48", "72"]
+                currentIndex: -1
+                inputMethodHints: Qt.ImhDigitsOnly
+                //% "Font size"
+                Accessible.name: qsTrId("FontSize")
+                Component.onCompleted: syncCurrentSize()
+                onActivated: index => {
+                    pending = true
+                    editText = textAt(index)
+                    commitSizeText()
+                }
+                onAccepted: commitSizeText()
+
+                Connections {
+                    target: root.editingState
+                    function onFontSizeChanged() {
+                        if (!fontSizeBox.pending)
+                            fontSizeBox.syncCurrentSize()
+                    }
+                    function onFormatCommitRequested() { fontSizeBox.commitSizeText(false) }
+                }
+
+                contentItem: TextField {
+                    id: fontSizeInput
+                    objectName: "tableCellFontSizeInput"
+                    leftPadding: 12
+                    rightPadding: activeFocus ? 3 : 1
+                    topPadding: 6 - fontSizeBox.padding
+                    bottomPadding: 6 - fontSizeBox.padding
+                    text: fontSizeBox.editText
+                    font: fontSizeBox.font
+                    enabled: fontSizeBox.editable
+                    autoScroll: true
+                    readOnly: fontSizeBox.down
+                    inputMethodHints: fontSizeBox.inputMethodHints
+                    validator: fontSizeBox.validator
+                    selectByMouse: true
+                    color: fontSizeBox.palette.text
+                    selectionColor: fontSizeBox.palette.highlight
+                    selectedTextColor: fontSizeBox.palette.highlightedText
+                    verticalAlignment: Text.AlignVCenter
+                    //% "Font size"
+                    Accessible.name: qsTrId("FontSize")
+                    onTextEdited: fontSizeBox.pending = true
+                    onActiveFocusChanged: {
+                        if (!activeFocus && !fontSizeBox.popup.visible)
+                            fontSizeBox.commitSizeText(false)
+                    }
+                    Keys.onPressed: event => {
+                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                && !fontSizeBox.popup.visible) {
+                            fontSizeBox.commitSizeText()
+                            event.accepted = true
+                        }
+                    }
+                    background: Rectangle {
+                        radius: 6
+                        color: fontSizeBox.palette.base
+                        border.width: fontSizeInput.activeFocus ? 2 : 1
+                        border.color: fontSizeInput.activeFocus
+                            ? root.theme.foxitBorderOrange : root.theme.ribbonBorder
+                    }
+                }
+
+                validator: IntValidator { bottom: 1; top: 512 }
+
+                background: Rectangle {
+                    radius: 6
+                    color: fontSizeBox.palette.button
+                    border.width: 1
+                    border.color: fontSizeBox.activeFocus
+                        ? root.theme.foxitBorderOrange : root.theme.ribbonBorder
+                }
             }
 
             RowLayout {

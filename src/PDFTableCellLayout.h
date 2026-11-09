@@ -3,6 +3,7 @@
 #include "PDFTableCellFormat.h"
 
 #include <QFont>
+#include <QGlyphRun>
 #include <QRectF>
 #include <QString>
 #include <QTextLayout>
@@ -14,6 +15,7 @@ namespace PDFTableCellLayout {
 inline constexpr int MaximumCellCharacters = 1024;
 inline constexpr int MaximumTableCharacters = 8192;
 inline constexpr qreal CellPadding = 3.0;
+inline constexpr qreal InkOverhang = 2.5;
 
 inline bool validText(const QString &text)
 {
@@ -68,6 +70,26 @@ inline QVector<QRectF> cellRects(const QRectF &frame, const QSizeF &pageSize,
     return result;
 }
 
+inline bool lineInkFits(const QTextLine &line, qreal top, const QSizeF &size)
+{
+    const QRectF bounds = QRectF(QPointF(), size).adjusted(
+        -InkOverhang, -InkOverhang, InkOverhang, InkOverhang);
+    for (const auto &run : line.glyphRuns()) {
+        const auto glyphs = run.glyphIndexes();
+        const auto positions = run.positions();
+        const auto font = run.rawFont();
+        if (!font.isValid() || glyphs.size() != positions.size())
+            return false;
+        for (qsizetype index = 0; index < glyphs.size(); ++index) {
+            const QRectF ink = font.boundingRect(glyphs[index]);
+            if (!ink.isEmpty()
+                && !bounds.contains(ink.translated(positions[index] + QPointF(0, top))))
+                return false;
+        }
+    }
+    return true;
+}
+
 inline bool fits(const QString &text, const QFont &font, const QSizeF &size,
                  const PDFTableCellFormat::Cell &format = {})
 {
@@ -80,8 +102,7 @@ inline bool fits(const QString &text, const QFont &font, const QSizeF &size,
     for (const QString &paragraph : text.split(QLatin1Char('\n'))) {
         const bool formatted = !format.defaultStyle.family.isEmpty();
         const auto paragraphFont = formatted
-            ? PDFTableCellFormat::displayFont(PDFTableCellFormat::styleAt(format, paragraphStart),
-                                              font.pixelSize()) : font;
+            ? PDFTableCellFormat::displayFont(PDFTableCellFormat::styleAt(format, paragraphStart)) : font;
         QTextLayout layout(paragraph.isEmpty() ? QStringLiteral(" ") : paragraph, paragraphFont);
         if (formatted && !paragraph.isEmpty()) {
             QVector<QTextLayout::FormatRange> ranges;
@@ -90,7 +111,7 @@ inline bool fits(const QString &text, const QFont &font, const QSizeF &size,
                 const int end = qMin(paragraphStart + int(paragraph.size()), span.start + span.length);
                 if (end > start) {
                     QTextCharFormat characterFormat;
-                    characterFormat.setFont(PDFTableCellFormat::displayFont(span.style, font.pixelSize()));
+                    characterFormat.setFont(PDFTableCellFormat::displayFont(span.style));
                     ranges.append({start - paragraphStart, end - start, characterFormat});
                 }
             }
@@ -106,6 +127,10 @@ inline bool fits(const QString &text, const QFont &font, const QSizeF &size,
             if (!line.isValid())
                 break;
             line.setLineWidth(size.width());
+            if (!lineInkFits(line, height, size)) {
+                fits = false;
+                break;
+            }
             height += line.height();
             if (height > size.height() + 0.001 || line.naturalTextWidth() > size.width() + 0.001) {
                 fits = false;

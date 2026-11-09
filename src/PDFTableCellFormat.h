@@ -19,6 +19,7 @@ struct Style {
     bool bold = false;
     bool italic = false;
     bool underline = false;
+    qreal fontSize = 12.0;
     bool operator==(const Style &) const = default;
 };
 struct Span {
@@ -34,10 +35,15 @@ struct Cell {
 };
 using Cells = QVector<Cell>;
 
+inline bool validFontSize(qreal size)
+{
+    return std::isfinite(size) && size >= 1.0 && size <= 512.0 && size == std::floor(size);
+}
+
 inline bool validStyle(const Style &style)
 {
     if (style.family.isEmpty() || style.family.size() > 256 || !style.family.isValidUtf16()
-        || style.family != style.family.trimmed())
+        || style.family != style.family.trimmed() || !validFontSize(style.fontSize))
         return false;
     for (const auto character : style.family) {
         if (character.category() == QChar::Other_Control)
@@ -76,14 +82,18 @@ inline Style styleAt(const Cell &cell, int position, bool preferPrevious = false
         if (index >= span.start && index < span.start + span.length)
             return span.style;
     }
+    // A final empty paragraph inherits its preceding newline in QTextDocument.
+    if (!cell.spans.isEmpty()
+        && index == cell.spans.constLast().start + cell.spans.constLast().length)
+        return cell.spans.constLast().style;
     return cell.defaultStyle;
 }
 
-inline QFont displayFont(const Style &style, qreal size)
+inline QFont displayFont(const Style &style)
 {
     const QString alias = ApplicationFonts::displayFamilyForStyle(style.family, style.bold, style.italic);
     QFont font(alias.isEmpty() ? style.family : alias);
-    font.setPixelSize(qMax(1, qRound(size)));
+    font.setPixelSize(qMax(1, qRound(style.fontSize)));
     font.setBold(style.bold);
     font.setItalic(style.italic);
     font.setUnderline(style.underline);
@@ -91,27 +101,31 @@ inline QFont displayFont(const Style &style, qreal size)
     font.setHintingPreference(QFont::PreferNoHinting);
 #endif
     font.setStretch(ApplicationFonts::calibratedFontStretch(alias, 100,
-        style.bold, style.italic, qMax(1, qRound(size))));
+        style.bold, style.italic, qMax(1, qRound(style.fontSize))));
     return font;
 }
 
 inline QJsonObject styleJson(const Style &style)
 {
     return {{QStringLiteral("family"), style.family}, {QStringLiteral("bold"), style.bold},
-            {QStringLiteral("italic"), style.italic}, {QStringLiteral("underline"), style.underline}};
+            {QStringLiteral("italic"), style.italic}, {QStringLiteral("underline"), style.underline},
+            {QStringLiteral("fontSize"), style.fontSize}};
 }
 
-inline bool readStyle(const QJsonObject &object, Style &style)
+inline bool readStyle(const QJsonObject &object, Style &style, bool requireFontSize = false)
 {
+    const auto size = object.value(QStringLiteral("fontSize"));
     if (!object.value(QStringLiteral("family")).isString()
         || !object.value(QStringLiteral("bold")).isBool()
         || !object.value(QStringLiteral("italic")).isBool()
-        || !object.value(QStringLiteral("underline")).isBool())
+        || !object.value(QStringLiteral("underline")).isBool()
+        || ((requireFontSize || !size.isUndefined()) && !size.isDouble()))
         return false;
     style = {object.value(QStringLiteral("family")).toString(),
              object.value(QStringLiteral("bold")).toBool(),
              object.value(QStringLiteral("italic")).toBool(),
-             object.value(QStringLiteral("underline")).toBool()};
+             object.value(QStringLiteral("underline")).toBool(),
+             size.isUndefined() ? 12.0 : size.toDouble()};
     return validStyle(style);
 }
 
@@ -129,11 +143,11 @@ inline QJsonObject toJson(const Cell &cell)
 }
 
 inline bool fromJson(const QJsonObject &object, const QString &text, Cell &cell,
-                     int maximumSpans = MaximumSpansPerCell)
+                     int maximumSpans = MaximumSpansPerCell, bool requireFontSize = false)
 {
     Cell result;
     if (!object.value(QStringLiteral("defaultStyle")).isObject()
-        || !readStyle(object.value(QStringLiteral("defaultStyle")).toObject(), result.defaultStyle)
+        || !readStyle(object.value(QStringLiteral("defaultStyle")).toObject(), result.defaultStyle, requireFontSize)
         || !object.value(QStringLiteral("spans")).isArray())
         return false;
     const auto spans = object.value(QStringLiteral("spans")).toArray();
@@ -151,7 +165,7 @@ inline bool fromJson(const QJsonObject &object, const QString &text, Cell &cell,
             || length.toDouble() <= 0 || length.toDouble() > text.size()
             || std::floor(start.toDouble()) != start.toDouble()
             || std::floor(length.toDouble()) != length.toDouble()
-            || !readStyle(entry, span.style))
+            || !readStyle(entry, span.style, requireFontSize))
             return false;
         span.start = start.toInt(-1);
         span.length = length.toInt(-1);

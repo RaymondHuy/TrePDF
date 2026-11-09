@@ -392,13 +392,13 @@ Current features:
   a line, Ctrl/Cmd+Enter commits, Escape cancels, and Tab/Shift+Tab commit then
   move between cells. Workspace-owned pending input survives delegate pooling;
   Save/navigation/tool changes commit first and invalid input blocks the change.
-  A lazy right-side Cell Properties panel provides font, B/I/U, validation
+  A lazy right-side Cell Properties panel provides font, font size, B/I/U, validation
   feedback and Apply/Cancel while text input stays inline. It replaces Shape
   Properties during cell editing and survives delegate pooling.
-  Inline font and Bold/Italic/Underline apply to selected characters or new
+  Inline font, size and Bold/Italic/Underline apply to selected characters or new
   typing at the caret, with Ctrl/Cmd+B/I/U shortcuts. Exact available faces
   are required; cell formatting and caret state survive delegate pooling.
-  Multiline cell text remains 12-point black,
+  Multiline cell text defaults to 12-point black, with integer sizes from 1 to 512 pt,
   follows the frame/dividers, and shares atomic Undo/Redo, deletion and Save.
   Each cell is limited to 1,024 UTF-16 units and 256 format runs, each table
   to 8,192 units and 1,024 runs; text and
@@ -406,7 +406,8 @@ Current features:
   and validated `TrePDFTableCell` child marks retain semantic text through
   Save/reopen; real embedded PDF text remains searchable/copyable, while child
   fragments stay excluded from independent Edit candidates. Version 5 retains
-  per-range font/B/I/U and empty-cell styles; table-owned underline paths
+  per-range font/B/I/U and empty-cell styles; version 6 adds per-range font sizes
+  and continues reading earlier tables at 12 pt. Table-owned underline paths
   participate in the same validated group, history, movement and deletion.
   See docs/table-drawing.md for the storage and UI contract.
 - Render every page through PDFium.

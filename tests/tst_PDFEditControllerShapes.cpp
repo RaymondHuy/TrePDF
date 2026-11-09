@@ -6,7 +6,9 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QQuickTextDocument>
+#include <QSet>
 #include <QTranslator>
+#include <cmath>
 
 using namespace PDFEditControllerTestSupport;
 
@@ -1023,6 +1025,32 @@ void PDFEditControllerTest::rejectsTamperedSourceShapeProvenance()
 }
 
 namespace {
+QSet<int> tableTextFontSizes(const QString &sourcePath)
+{
+    PDFiumProcessLock lock;
+    const QByteArray path = QFile::encodeName(sourcePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(path.constData(), nullptr);
+    if (!document)
+        return {};
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return {};
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    QSet<int> sizes;
+    for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+        const auto object = FPDFPage_GetObject(page, index);
+        if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT)
+            continue;
+        float size = 0;
+        if (!FPDFTextObj_GetFontSize(object, &size) || !std::isfinite(size)
+            || std::abs(size - std::round(size)) > .001)
+            return {};
+        sizes.insert(qRound(size));
+    }
+    return sizes;
+}
+
 QJsonObject readTableTestMetadata(const QString &sourcePath)
 {
     PDFiumProcessLock lock;
@@ -1087,6 +1115,72 @@ bool rewriteTableTestMetadata(const QString &sourcePath, const QString &targetPa
     if (!FPDFPageObjMark_SetBlobParam(document, object, mark, "Data",
             reinterpret_cast<const unsigned char *>(bytes.constData()),
             static_cast<unsigned long>(bytes.size())) || !FPDFPage_GenerateContent(page))
+        return false;
+    PdfFileWriter writer(targetPath);
+    return writer.open() && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
+}
+
+bool writeLegacyTableFormats(const QString &sourcePath, const QString &targetPath)
+{
+    PDFiumProcessLock lock;
+    const QByteArray path = QFile::encodeName(sourcePath);
+    FPDF_DOCUMENT document = FPDF_LoadDocument(path.constData(), nullptr);
+    if (!document)
+        return false;
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    FPDF_PAGE page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return false;
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+        const auto object = FPDFPage_GetObject(page, index);
+        if (FPDFPageObj_CountMarks(object) != 1)
+            return false;
+        const auto mark = FPDFPageObj_GetMark(object, 0);
+        unsigned long length = 0;
+        if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data", nullptr, 0, &length)
+            || length == 0 || length > 128 * 1024)
+            return false;
+        QByteArray bytes(qsizetype(length), Qt::Uninitialized);
+        if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data",
+                reinterpret_cast<unsigned char *>(bytes.data()), length, &length))
+            return false;
+        QJsonObject data = QJsonDocument::fromJson(bytes).object();
+        if (index == 0) {
+            if (data.value(QStringLiteral("version")).toInt() != 6)
+                return false;
+            data[QStringLiteral("version")] = 5;
+            QJsonArray formats;
+            for (const auto &value : data.value(QStringLiteral("cellFormats")).toArray()) {
+                auto format = value.toObject();
+                auto style = format.value(QStringLiteral("defaultStyle")).toObject();
+                style.remove(QStringLiteral("fontSize"));
+                format[QStringLiteral("defaultStyle")] = style;
+                QJsonArray spans;
+                for (const auto &spanValue : format.value(QStringLiteral("spans")).toArray()) {
+                    auto span = spanValue.toObject();
+                    span.remove(QStringLiteral("fontSize"));
+                    spans.append(span);
+                }
+                format[QStringLiteral("spans")] = spans;
+                formats.append(format);
+            }
+            data[QStringLiteral("cellFormats")] = formats;
+        } else {
+            if (data.value(QStringLiteral("version")).toInt() != 3)
+                return false;
+            data[QStringLiteral("version")] = 2;
+            auto style = data.value(QStringLiteral("style")).toObject();
+            style.remove(QStringLiteral("fontSize"));
+            data[QStringLiteral("style")] = style;
+        }
+        bytes = QJsonDocument(data).toJson(QJsonDocument::Compact);
+        if (!FPDFPageObjMark_SetBlobParam(document, object, mark, "Data",
+                reinterpret_cast<const unsigned char *>(bytes.constData()),
+                static_cast<unsigned long>(bytes.size())))
+            return false;
+    }
+    if (!FPDFPage_GenerateContent(page))
         return false;
     PdfFileWriter writer(targetPath);
     return writer.open() && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
@@ -1511,6 +1605,7 @@ void PDFEditControllerTest::editsTableCellFormatsWithAtomicHistory()
     QCOMPARE(formats(), QVariantList{expected});
     Cell changed = format;
     changed.spans[0].style.underline = true;
+    changed.spans[0].style.fontSize = 24;
     QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(changed)).isEmpty());
     QCOMPARE(formats(), QVariantList{toVariant(changed)});
     controller.undo();
@@ -1548,6 +1643,27 @@ void PDFEditControllerTest::rejectsInvalidTableCellFormats()
         map[QStringLiteral("spans")] = spans;
         QVERIFY2(reject(map), qPrintable(key));
     }
+    for (const QVariant &size : {QVariant(0), QVariant(-1), QVariant(513), QVariant(12.5),
+                                 QVariant(QStringLiteral("18")), QVariant(true)}) {
+        for (const bool defaultStyle : {false, true}) {
+            QVariantMap map = toVariant(validFormat);
+            if (defaultStyle) {
+                QVariantMap style = map.value(QStringLiteral("defaultStyle")).toMap();
+                style[QStringLiteral("fontSize")] = size;
+                map[QStringLiteral("defaultStyle")] = style;
+            } else {
+                QVariantList spans = map.value(QStringLiteral("spans")).toList();
+                QVariantMap span = spans.first().toMap();
+                span[QStringLiteral("fontSize")] = size;
+                spans[0] = span;
+                map[QStringLiteral("spans")] = spans;
+            }
+            QVERIFY2(reject(map), qPrintable(size.toString()));
+        }
+    }
+    Cell oversized = validFormat;
+    oversized.spans[0].style.fontSize = 512;
+    QVERIFY(reject(toVariant(oversized))); // A legal size can still exceed the cell's frame.
     Cell gap = validFormat;
     gap.spans[0].start = 1;
     QVERIFY(reject(toVariant(gap)));
@@ -1568,22 +1684,75 @@ void PDFEditControllerTest::rejectsInvalidTableCellFormats()
     Cell split{{testFontFamily()}, {{0, 1, {testFontFamily()}}, {1, 1, {testFontFamily(), true}}}};
     QVERIFY(!controller.setSelectedTableCellContent(0, 0, surrogate, toVariant(split)).isEmpty());
     QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().isEmpty());
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, text,
+        toVariant(plain(text, {testFontFamily(), false, false, false, 1}))).isEmpty());
+    controller.undo();
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, QString(),
+        toVariant(Cell{{testFontFamily(), false, false, false, 512}, {}})).isEmpty());
+    controller.undo(); // Boundary sizes are valid when their content fits.
     controller.undo();
     QVERIFY(!controller.canUndo());
     QVERIFY(!controller.hasDrafts());
 }
 
+void PDFEditControllerTest::rejectsTableCellInkOverflowAndPreservesPaddedText()
+{
+    using namespace PDFTableCellFormat;
+    for (int rotation = 0; rotation < 4; ++rotation) {
+        const QString path = m_temporaryDirectory.filePath(QStringLiteral("cell-ink-%1.pdf").arg(rotation));
+        const QString saved = m_temporaryDirectory.filePath(QStringLiteral("cell-ink-saved-%1.pdf").arg(rotation));
+        QVERIFY(createTableTestPage(path, rotation));
+        PDFDocument document;
+        PDFEditController controller;
+        QVERIFY(document.open(QUrl::fromLocalFile(path)));
+        controller.setDocument(&document);
+        controller.setShapeType(PDFEditController::TableShape);
+        controller.setTableRows(2);
+        controller.setTableColumns(1);
+        QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+
+        const QString text = QStringLiteral("j");
+        const Cell large = plain(text, {testFontFamily(), false, true, true, 72});
+        // Its 16-point advance fits, but the italic glyph paints about eight
+        // points to the left. Reject it before Save would lose table ownership.
+        QVERIFY(!controller.setSelectedTableCellContent(0, 0, text, toVariant(large)).isEmpty());
+        QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().isEmpty());
+
+        const Cell small = plain(text, {testFontFamily(), false, true, true, 12});
+        QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(small)).isEmpty());
+        const QString padded = QStringLiteral(" j");
+        const Cell inset = plain(padded, {testFontFamily(), false, true, true, 72});
+        QVERIFY(controller.setSelectedTableCellContent(1, 0, padded, toVariant(inset)).isEmpty());
+        QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+        QCOMPARE(tableTextFontSizes(saved), QSet<int>({12, 72}));
+        QCOMPARE(inspectShapePaths(saved).count, 4); // Grid; padding space and glyphs have separate underlines.
+
+        PDFDocument reopenedDocument;
+        PDFEditController reopened;
+        QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+        reopened.setDocument(&reopenedDocument);
+        const auto table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+        QVERIFY2(!table.isEmpty(), "Accepted large italic text must remain a managed table after reopening.");
+        QCOMPARE(table.value(QStringLiteral("tableCellTexts")).toStringList(), QStringList({text, padded}));
+        QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList(), QVariantList({toVariant(small), toVariant(inset)}));
+    }
+}
+
 void PDFEditControllerTest::savesFormattedTableCellsRoundTrip_data()
 {
     QTest::addColumn<int>("rotation");
-    for (int rotation = 0; rotation < 4; ++rotation)
-        QTest::newRow(qPrintable(QString::number(rotation * 90))) << rotation;
+    QTest::addColumn<bool>("mixedSizes");
+    for (int rotation = 0; rotation < 4; ++rotation) {
+        QTest::newRow(qPrintable(QStringLiteral("%1-regular-size").arg(rotation * 90))) << rotation << false;
+        QTest::newRow(qPrintable(QStringLiteral("%1-mixed-sizes").arg(rotation * 90))) << rotation << true;
+    }
 }
 
 void PDFEditControllerTest::savesFormattedTableCellsRoundTrip()
 {
     using namespace PDFTableCellFormat;
     QFETCH(int, rotation);
+    QFETCH(bool, mixedSizes);
     const QString path = m_temporaryDirectory.filePath(QStringLiteral("formatted-cell-%1.pdf").arg(rotation));
     const QString saved = m_temporaryDirectory.filePath(QStringLiteral("formatted-cell-saved-%1.pdf").arg(rotation));
     QVERIFY(createTableTestPage(path, rotation));
@@ -1599,19 +1768,28 @@ void PDFEditControllerTest::savesFormattedTableCellsRoundTrip()
     controller.setTableRows(2);
     controller.setTableColumns(1);
     QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
-    const QString text = QStringLiteral("Plain Bold Italic Under");
+    const QString text = QStringLiteral("Plain Bold Italic Under")
+        + (mixedSizes ? QStringLiteral("\n") : QString());
     const Style regular{testFontFamily()};
-    const Cell format{regular, {{0, 6, regular}, {6, 5, {regular.family, true}},
-        {11, 7, {alternate, false, true}}, {18, 5, {regular.family, false, false, true}}}};
-    const Cell empty{{regular.family, true, true, true}, {}};
+    Cell format{regular, {{0, 6, regular}, {6, 5, {regular.family, true}},
+        {11, 7, {alternate, false, true}}, {18, int(text.size()) - 18, {regular.family, false, false, true}}}};
+    Cell empty{{regular.family, true, true, true}, {}};
+    if (mixedSizes) {
+        format.spans[0].style.fontSize = 9;
+        format.spans[1].style.fontSize = 18;
+        format.spans[2].style.fontSize = 24;
+        format.spans[3].style.fontSize = 20;
+        empty.defaultStyle.fontSize = 22;
+    }
     const QString error = controller.setSelectedTableCellContent(0, 0, text, toVariant(format));
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QVERIFY(controller.setSelectedTableCellContent(1, 0, QString(), toVariant(empty)).isEmpty());
     const QVariantList expected{toVariant(format), toVariant(empty)};
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
-    QCOMPARE(readTableTestMetadata(saved).value(QStringLiteral("version")).toInt(), 5);
+    QCOMPARE(readTableTestMetadata(saved).value(QStringLiteral("version")).toInt(), 6);
+    QCOMPARE(tableTextFontSizes(saved), mixedSizes ? QSet<int>({9, 18, 20, 24}) : QSet<int>({12}));
     QVERIFY(inspectShapePaths(saved).count > 1); // Grid plus a real vector underline.
-    QVERIFY(pageText(saved).contains(text));
+    QVERIFY(pageText(saved).contains(text.trimmed()));
     const auto bold = textObjectFontInfo(saved, QStringLiteral("Bold"));
     QVERIFY(bold.found);
     QVERIFY(bold.weight >= 600);
@@ -1622,12 +1800,22 @@ void PDFEditControllerTest::savesFormattedTableCellsRoundTrip()
     QCOMPARE(italic.familyName, alternate);
     PDFDocument reopenedDocument;
     PDFEditController reopened;
+    if (!mixedSizes) {
+        const QString legacy = m_temporaryDirectory.filePath(QStringLiteral("formatted-cell-legacy-%1.pdf").arg(rotation));
+        QVERIFY(writeLegacyTableFormats(saved, legacy));
+        QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(legacy)));
+        reopened.setDocument(&reopenedDocument);
+        const auto oldTable = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+        QVERIFY2(!oldTable.isEmpty(), "Version 5 tables without fontSize fields remain editable.");
+        QCOMPARE(oldTable.value(QStringLiteral("tableCellFormats")).toList(), expected);
+    }
     QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
     reopened.setDocument(&reopenedDocument);
     auto candidates = waitForCandidates(reopened, 0);
     auto table = candidateForKind(candidates, QStringLiteral("sourceShape"));
     QVERIFY2(!table.isEmpty(), "A rich table and its underline children must rehydrate together.");
     QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList(), expected);
+    QCOMPARE(tableTextFontSizes(saved), mixedSizes ? QSet<int>({9, 18, 20, 24}) : QSet<int>({12}));
     for (const auto &candidate : candidates) {
         if (candidate.toMap().value(QStringLiteral("objectId")) != table.value(QStringLiteral("objectId")))
             QVERIFY(!candidate.toMap().value(QStringLiteral("editable")).toBool());
@@ -1676,7 +1864,7 @@ void PDFEditControllerTest::savesUnderlinedTableSpaces()
         controller.setTableColumns(1);
         QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
         const QString text = QStringLiteral("   ");
-        const Cell format = plain(text, {testFontFamily(), false, false, true});
+        const Cell format = plain(text, {testFontFamily(), false, false, true, 24});
         QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(format)).isEmpty());
         QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
         QCOMPARE(inspectShapePaths(saved).count, 2); // Grid plus visible underline under spaces.
@@ -1696,7 +1884,8 @@ void PDFEditControllerTest::rejectsTamperedTableCellFormatting_data()
     QTest::addColumn<QString>("change");
     for (const auto &change : {QStringLiteral("missing-underline"), QStringLiteral("moved-underline"),
                               QStringLiteral("format-disagrees"), QStringLiteral("malformed-format"),
-                              QStringLiteral("missing-space-pair")})
+                              QStringLiteral("missing-space-pair"), QStringLiteral("size-disagrees"),
+                              QStringLiteral("missing-size")})
         QTest::newRow(qPrintable(change)) << change;
 }
 
@@ -1729,6 +1918,10 @@ void PDFEditControllerTest::rejectsTamperedTableCellFormatting()
         QVariantMap span = spans.first().toMap();
         if (change == QLatin1String("format-disagrees"))
             span[QStringLiteral("underline")] = false;
+        else if (change == QLatin1String("size-disagrees"))
+            span[QStringLiteral("fontSize")] = 24;
+        else if (change == QLatin1String("missing-size"))
+            span.remove(QStringLiteral("fontSize"));
         else
             span[QStringLiteral("length")] = text.size() + 1;
         spans[0] = span;
@@ -2483,6 +2676,17 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QVERIFY(!cellPanel()->isAncestorOf(cellInput));
     auto *cellFontBox = itemNamed(QStringLiteral("tableCellFontBox"));
     QVERIFY(cellFontBox && cellPanel()->isAncestorOf(cellFontBox));
+    QVERIFY(itemNamed(QStringLiteral("tableCellFontSizeBox")));
+    const auto enterSizeText = [&](const QString &text) {
+        auto *sizeInput = itemNamed(QStringLiteral("tableCellFontSizeInput"));
+        if (!sizeInput || !sizeInput->isEnabled())
+            return false;
+        clickItem(sizeInput);
+        QTest::keySequence(window, QKeySequence(QKeySequence::SelectAll));
+        for (const QChar character : text)
+            QTest::keyClick(window, character.toLatin1());
+        return sizeInput->property("text").toString() == text;
+    };
     const QRectF firstCellInOverlay(tableFrame.left() * overlay->width(),
         tableFrame.top() * overlay->height(), tableFrame.width() * overlay->width() / 4,
         tableFrame.height() * overlay->height() / 3);
@@ -2616,13 +2820,22 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
     const QString savedInline = QStringLiteral("Saved inline");
     QVERIFY(cellInput->setProperty("text", savedInline));
-    cellInput->forceActiveFocus();
+    QVERIFY(QMetaObject::invokeMethod(cellInput, "select", Q_ARG(int, 0), Q_ARG(int, savedInline.size())));
+    QVERIFY(enterSizeText(QStringLiteral("14")));
+    // Save flushes the numeric field while it still owns keyboard focus.
     QTest::keySequence(window, QKeySequence(QKeySequence::Save));
     QTRY_VERIFY(!cellInputVisible());
-    QTRY_VERIFY(pageText(savedPath).contains(savedInline));
     QTRY_VERIFY(!controller.saving());
     QVERIFY(!controller.hasDrafts());
+    // A larger size can wrap at the word boundary in the narrow first cell.
+    QTRY_VERIFY2(pageText(savedPath).simplified().contains(savedInline), qPrintable(pageText(savedPath)));
     savedCells = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(savedCells.value(QStringLiteral("tableCellTexts")).toStringList().first(), savedInline);
+    QCOMPARE(tableTextFontSizes(savedPath), QSet<int>({14}));
+    const auto savedSizeSpans = savedCells.value(QStringLiteral("tableCellFormats")).toList()
+        .first().toMap().value(QStringLiteral("spans")).toList();
+    QVERIFY(!savedSizeSpans.isEmpty());
+    QCOMPARE(savedSizeSpans.first().toMap().value(QStringLiteral("fontSize")).toInt(), 14);
     QVERIFY(controller.selectCandidate(0, savedCells.value(QStringLiteral("objectId")).toString()));
 
     // Tab commits this cell and opens its neighbor; Shift+Tab goes back.
@@ -2714,7 +2927,24 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QVERIFY(!controller.hasDrafts());
     QTest::keySequence(window, QKeySequence(QKeySequence::Redo));
     QTRY_VERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 0).underline);
+    const qreal unselectedSize = PDFTableCellFormat::styleAt(inlineFormat(), 6).fontSize;
+    // Native redo restores a caret; select the range for this new formatting action.
+    QVERIFY(QMetaObject::invokeMethod(cellInput, "select", Q_ARG(int, 0), Q_ARG(int, 5)));
+    QVERIFY(enterSizeText(QStringLiteral("18")));
+    QTest::keyClick(window, Qt::Key_Return);
+    QTRY_COMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 0).fontSize, 18);
+    QCOMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 6).fontSize, unselectedSize);
+    QCOMPARE(cellInput->property("selectionStart").toInt(), 0);
+    QCOMPARE(cellInput->property("selectionEnd").toInt(), 5);
+    QTest::keySequence(window, QKeySequence(QKeySequence::Undo));
+    QTRY_COMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 0).fontSize, unselectedSize);
+    QTest::keySequence(window, QKeySequence(QKeySequence::Redo));
+    QTRY_COMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 0).fontSize, 18);
     QVERIFY(QMetaObject::invokeMethod(cellInput, "select", Q_ARG(int, 10), Q_ARG(int, 10)));
+    QVERIFY(enterSizeText(QStringLiteral("16")));
+    QTest::keyClick(window, Qt::Key_Return);
+    QCOMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 0).fontSize, 18);
+    QCOMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 6).fontSize, unselectedSize);
     QTest::keyClick(window, Qt::Key_B, Qt::ControlModifier);
     QTest::keyClick(window, Qt::Key_I, Qt::ControlModifier);
     QTest::keyClick(window, Qt::Key_U, Qt::ControlModifier);
@@ -2724,18 +2954,27 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 10).italic);
     QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 10).underline);
     QVERIFY(!PDFTableCellFormat::styleAt(inlineFormat(), 6).bold);
-    const QVariantMap formattedSnapshot = inlineState().value(QStringLiteral("format")).toMap();
+    QCOMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 10).fontSize, 16);
+    QVariantMap formattedSnapshot = inlineState().value(QStringLiteral("format")).toMap();
     if (!screenshotPrefix.isEmpty()) {
         QTest::qWait(100);
         QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-cell-formatted.png")));
     }
+    QVERIFY(enterSizeText(QStringLiteral("20")));
+    // Pooling flushes a valid pending size before destroying the inline editor.
     QVERIFY(overlay->setProperty("pooled", true));
     QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(!itemNamed(QStringLiteral("tableCellFontSizeBox"))->isEnabled());
     QVERIFY(overlay->setProperty("pooled", false));
     QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
     QTRY_COMPARE(inlineState().value(QStringLiteral("format")).toMap(), formattedSnapshot);
     QCOMPARE(cellInput->property("cursorPosition").toInt(), 11);
+    QTRY_COMPARE(inlineState().value(QStringLiteral("fontSize")).toInt(), 20);
     cellInput->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Question);
+    QTRY_COMPARE(cellInput->property("text").toString(), QStringLiteral("Range text!?"));
+    QCOMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 11).fontSize, 20);
+    formattedSnapshot = inlineState().value(QStringLiteral("format")).toMap();
     QTest::keyClick(window, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(!cellInputVisible());
     QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableCellFormats")).toList().first().toMap(), formattedSnapshot);
