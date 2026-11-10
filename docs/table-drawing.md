@@ -69,6 +69,15 @@ sẽ báo lỗi và giữ nguyên phần đang nhập. Kéo đường phân các
 chỉ áp dụng khi nội dung vẫn vừa tất cả các ô. Di chuyển bảng, xóa, Undo/Redo
 và Discard luôn xử lý chữ cùng khung bảng.
 
+**Xoay chữ** trong panel Thuộc tính ô chọn 0°, 90°, 180° hoặc 270° theo chiều
+kim đồng hồ. Góc xoay áp dụng cho toàn bộ nội dung ô, độc lập với vùng bôi đen;
+font/cỡ chữ/B/I/U tiếp tục áp dụng cho từng đoạn. Khung ô không xoay. Ở 90° và
+270°, chiều rộng và chiều cao dùng để dàn chữ đổi chỗ, nên chữ xuống dòng và
+được kiểm tra vừa ô theo hướng mới. Editor trực tiếp và preview cùng hướng
+với chữ khi Save. Góc xoay được giữ khi sửa chữ, chuyển ô, cuộn khỏi trang,
+Undo/Redo và lưu/mở lại, kể cả ô trống. Áp dụng hoặc Save hoàn tất cả nội dung
+và góc xoay; Hủy/Escape bỏ phần thay đổi đang nhập.
+
 ## Dữ liệu và lưu PDF
 
 `TableShape` được thêm cuối enum `ShapeType`, dùng `AddShapeTool` và pipeline
@@ -100,6 +109,12 @@ PDF thực để tìm kiếm/sao chép, không phải ảnh hoặc nét outline.
 chung pipeline nhúng font với Add Text. Nét underline dùng child marker
 của bảng, được kiểm tra geometry và liên kết với fragment chữ tương ứng;
 di chuyển, xóa và suppression xử lý cả chữ lẫn các nét này.
+
+Bảng có ô xoay dùng metadata version 8, lưu góc xoay của từng ô cùng các đoạn
+định dạng. Child `TrePDFTableCell` version 4 lưu góc xoay và fingerprint của
+chữ/nét gạch chân; reader kiểm tra hướng chữ, biên ô và cặp gạch chân trong
+hệ tọa độ dàn chữ chưa xoay. Các bảng version 4–6 tiếp tục đọc ở góc 0°;
+version 7 dành riêng cho khung nguồn vẫn giữ hành vi chỉ sửa đường kẻ.
 
 `PDFTableFrameRecognition.h` quét riêng khung nguồn với giới hạn 50.000
 đối tượng, 16.384 segment, 2.048 thành phần nét và 64 khung mỗi trang; có

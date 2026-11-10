@@ -5450,6 +5450,14 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>Oblikovanje ćelije nije valjano ili je presloženo. Smanjite broj promjena fonta ili stila.</translation>
     </message>
+    <message id="TableCellRotation">
+        <source>Cell text rotation</source>
+        <translation>Rotacija teksta u ćeliji</translation>
+    </message>
+    <message id="TableCellRotationHint">
+        <source>Rotates all text in this cell clockwise.</source>
+        <translation>Rotira sav tekst u ovoj ćeliji u smjeru kazaljke na satu.</translation>
+    </message>
     <message id="TableCellProperties">
         <location filename="../src/Components/TableCellPanel.qml" line="59"/>
         <source>Cell properties</source>

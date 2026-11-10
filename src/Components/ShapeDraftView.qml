@@ -122,12 +122,21 @@ Item {
             readonly property string semanticText: root.tableCellTexts[index]
             readonly property var cellFormat: root.tableCellFormats.length > index
                 ? root.tableCellFormats[index] : ({})
+            readonly property int textRotation: Number(cellFormat.rotation || 0)
+            readonly property bool sideways: textRotation === 90 || textRotation === 270
+            readonly property real cellWidth: cellRect.width * root.width
+            readonly property real cellHeight: cellRect.height * root.height
             property bool initialized: false
             objectName: "tableCellPreview" + index
             x: cellRect.x * root.width
-            y: cellRect.y * root.height + root.tableTextScale
-            width: cellRect.width * root.width / Math.max(0.01, root.tableTextScale)
+                + (textRotation === 90 || textRotation === 180 ? cellWidth : 0)
+                + (textRotation === 90 ? -root.tableTextScale : textRotation === 270 ? root.tableTextScale : 0)
+            y: cellRect.y * root.height
+                + (textRotation === 180 || textRotation === 270 ? cellHeight : 0)
+                + (textRotation === 0 ? root.tableTextScale : textRotation === 180 ? -root.tableTextScale : 0)
+            width: (sideways ? cellHeight : cellWidth) / Math.max(0.01, root.tableTextScale)
             scale: root.tableTextScale
+            rotation: textRotation
             transformOrigin: Item.TopLeft
             textFormat: TextEdit.PlainText
             wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere

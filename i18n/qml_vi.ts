@@ -5571,6 +5571,14 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>Định dạng ô không hợp lệ hoặc quá phức tạp. Hãy giảm số lần đổi font hoặc kiểu chữ.</translation>
     </message>
+    <message id="TableCellRotation">
+        <source>Cell text rotation</source>
+        <translation>Xoay chữ trong ô</translation>
+    </message>
+    <message id="TableCellRotationHint">
+        <source>Rotates all text in this cell clockwise.</source>
+        <translation>Xoay toàn bộ chữ trong ô theo chiều kim đồng hồ.</translation>
+    </message>
     <message id="TableCellProperties">
         <location filename="../src/Components/TableCellPanel.qml" line="59"/>
         <source>Cell properties</source>

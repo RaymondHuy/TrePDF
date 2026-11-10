@@ -184,12 +184,14 @@ inline bool underlineSignaturesMatch(const QJsonArray &actual, const QJsonArray 
 inline bool writeFragment(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const QString &id,
                            int cell, int index, int count, int start, int length,
                            const QString &text, const QJsonArray &physical,
-                           const PDFTableCellFormat::Cell *format, bool underline)
+                           const PDFTableCellFormat::Cell *format, bool underline,
+                           bool rotatedCells = false)
 {
-    if (physical.isEmpty() || FPDFPageObj_CountMarks(object) != 0 || (underline && !format))
+    if (physical.isEmpty() || FPDFPageObj_CountMarks(object) != 0
+        || ((underline || rotatedCells) && !format))
         return false;
     QJsonObject data{
-        {QStringLiteral("version"), format ? 3 : 1}, {QStringLiteral("id"), id},
+        {QStringLiteral("version"), rotatedCells ? 4 : format ? 3 : 1}, {QStringLiteral("id"), id},
         {QStringLiteral("cell"), cell}, {QStringLiteral("index"), index},
         {QStringLiteral("count"), count}, {QStringLiteral("start"), start},
         {QStringLiteral("length"), length}, {QStringLiteral("text"), text},
@@ -197,6 +199,8 @@ inline bool writeFragment(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const 
     if (format) {
         data.insert(QStringLiteral("role"), underline ? QStringLiteral("underline") : QStringLiteral("text"));
         data.insert(QStringLiteral("style"), styleObject(PDFTableCellFormat::styleAt(*format, start)));
+        if (rotatedCells)
+            data.insert(QStringLiteral("rotation"), format->rotation);
     }
     const QByteArray bytes = QJsonDocument(data).toJson(QJsonDocument::Compact);
     if (bytes.size() > MaximumFragmentBytes)
@@ -210,19 +214,22 @@ inline bool writeFragment(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const 
 inline bool write(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const QString &id,
                    int cell, int index, int count, int start, int length,
                    const QString &text, FontFingerprints &fonts,
-                   const PDFTableCellFormat::Cell *format = nullptr)
+                   const PDFTableCellFormat::Cell *format = nullptr,
+                   bool rotatedCells = false)
 {
     return writeFragment(document, object, id, cell, index, count, start, length,
                          text, signature(object, fonts, format
-                             ? PDFTableCellFormat::styleAt(*format, start).fontSize : 12.0), format, false);
+                             ? PDFTableCellFormat::styleAt(*format, start).fontSize : 12.0),
+                         format, false, rotatedCells);
 }
 
 inline bool writeUnderline(FPDF_DOCUMENT document, FPDF_PAGEOBJECT object, const QString &id,
                             int cell, int index, int count, int start, int length,
-                            const QString &text, const PDFTableCellFormat::Cell &format)
+                            const QString &text, const PDFTableCellFormat::Cell &format,
+                            bool rotatedCells = false)
 {
     return writeFragment(document, object, id, cell, index, count, start, length,
-                         text, underlineSignature(object), &format, true);
+                         text, underlineSignature(object), &format, true, rotatedCells);
 }
 
 struct Group {
@@ -402,6 +409,7 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
     const auto &records = children == indexed.children.cend() ? noChildren : *children;
     const bool styled = !metadata.tableCellFormats.isEmpty();
     const bool sized = styled && metadata.tableCellFormatVersion >= 6;
+    const bool rotatedCells = styled && metadata.tableCellFormatVersion == 8;
     for (const IndexedChild &record : records) {
         if (cancelled(cancellation))
             return false;
@@ -420,7 +428,8 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
         };
         const int cell = integer("cell"), index = integer("index"), count = integer("count");
         const int start = integer("start"), spanLength = integer("length");
-        if (data.size() != (styled ? 11 : 9) || integer("version") != (sized ? 3 : styled ? 2 : 1)
+        if (data.size() != (rotatedCells ? 12 : styled ? 11 : 9)
+            || integer("version") != (rotatedCells ? 4 : sized ? 3 : styled ? 2 : 1)
             || cell < 0 || cell >= metadata.tableCellTexts.size()
             || count < 1 || count > PDFTableCellLayout::MaximumCellCharacters
             || index < 0 || index >= count || start < 0 || spanLength < 1
@@ -434,8 +443,12 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
         bool needsUnderline = false;
         bool underline = false;
         qreal fontSize = 12.0;
+        int rotation = 0;
         if (styled) {
             const auto &format = metadata.tableCellFormats[cell];
+            rotation = format.rotation;
+            if (rotatedCells && integer("rotation") != rotation)
+                return false;
             const auto style = PDFTableCellFormat::styleAt(format, start);
             const auto role = data.value(QStringLiteral("role"));
             if (!role.isString() || (role.toString() != QLatin1String("text")
@@ -456,7 +469,18 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
             rects[cell].y() * pageSize.height(), rects[cell].width() * pageSize.width(),
             rects[cell].height() * pageSize.height());
         constexpr qreal overhang = PDFTableCellLayout::InkOverhang;
-        const QRectF safeFrame = cellFrame.adjusted(-overhang, -overhang, overhang, overhang);
+        const QTransform toLocal = rotatedCells
+            ? PDFTableCellLayout::cellTransform(cellFrame, rotation).inverted() : QTransform();
+        const QRectF layoutFrame = rotatedCells
+            ? QRectF(QPointF(), PDFTableCellLayout::layoutSize(cellFrame.size(), rotation)) : cellFrame;
+        const QRectF safeFrame = layoutFrame.adjusted(-overhang, -overhang, overhang, overhang);
+        const auto localPoint = [&](const QPointF &point, QPointF &result) {
+            QPointF display;
+            if (!mapper.devicePoint(point, display))
+                return false;
+            result = toLocal.map(display);
+            return std::isfinite(result.x()) && std::isfinite(result.y());
+        };
         QJsonArray physical;
         if (underline) {
             physical = underlineSignature(object);
@@ -468,9 +492,9 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
                 || part.start != start || part.length != spanLength || part.index != index || part.count != count)
                 return false;
             QPointF first, last, baseline;
-            if (!mapper.devicePoint(QPointF(physical[1].toDouble(), physical[2].toDouble()), first)
-                || !mapper.devicePoint(QPointF(physical[3].toDouble(), physical[4].toDouble()), last)
-                || !mapper.devicePoint(QPointF(part.physical[4].toDouble(), part.physical[5].toDouble()), baseline)
+            if (!localPoint(QPointF(physical[1].toDouble(), physical[2].toDouble()), first)
+                || !localPoint(QPointF(physical[3].toDouble(), physical[4].toDouble()), last)
+                || !localPoint(QPointF(part.physical[4].toDouble(), part.physical[5].toDouble()), baseline)
                 || !safeFrame.contains(first) || !safeFrame.contains(last)
                 || last.x() <= first.x() || std::abs(first.y() - last.y()) > .05
                 || std::abs(first.x() - baseline.x()) > .05
@@ -482,6 +506,17 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
             physical = signature(object, indexed.fonts, fontSize);
             if (!signaturesMatch(physical, data.value(QStringLiteral("signature")).toArray()))
                 return false;
+            if (rotatedCells) {
+                const QPointF origin(physical[4].toDouble(), physical[5].toDouble());
+                QPointF baseline, right, up;
+                if (!localPoint(origin, baseline)
+                    || !localPoint(origin + QPointF(physical[0].toDouble(), physical[1].toDouble()), right)
+                    || !localPoint(origin + QPointF(physical[2].toDouble(), physical[3].toDouble()), up)
+                    || right.x() <= baseline.x() || std::abs(right.y() - baseline.y()) > .001
+                    || std::abs(up.x() - baseline.x()) > .001
+                    || std::abs(up.y() - baseline.y() + 1.0) > .001)
+                    return false;
+            }
             const unsigned long textBytes = FPDFTextObj_GetText(object, textPage, nullptr, 0);
             if (textBytes < 2 || textBytes % 2)
                 return false;
@@ -514,7 +549,7 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
             for (int x : {6, 8}) {
                 for (int y : {7, 9}) {
                     QPointF display;
-                    if (!mapper.devicePoint(QPointF(physical[x].toDouble(), physical[y].toDouble()), display)
+                    if (!localPoint(QPointF(physical[x].toDouble(), physical[y].toDouble()), display)
                         || !safeFrame.contains(display))
                         return false;
                 }

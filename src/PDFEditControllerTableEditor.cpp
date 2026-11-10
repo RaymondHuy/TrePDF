@@ -15,6 +15,7 @@
 namespace {
 using namespace PDFTableCellFormat;
 constexpr int SemanticFamilyProperty = QTextFormat::UserProperty + 421;
+constexpr char CellRotationProperty[] = "trepdfTableCellRotation";
 
 QTextCharFormat characterFormat(const Style &style)
 {
@@ -66,6 +67,7 @@ public:
         const bool undoEnabled = document->isUndoRedoEnabled();
         document->setUndoRedoEnabled(false);
         m_defaultStyle = format.defaultStyle;
+        document->setProperty(CellRotationProperty, format.rotation);
         document->setDefaultFont(displayFont(m_defaultStyle));
         if (document->toPlainText() != text)
             document->setPlainText(text);
@@ -95,6 +97,7 @@ public:
         synchronize();
         const QString text = textDocument()->toPlainText();
         Cell cell{m_defaultStyle, {}};
+        cell.rotation = textDocument()->property(CellRotationProperty).toInt();
         if (text.isEmpty() && m_typingPosition >= 0)
             cell.defaultStyle = m_typingStyle;
         for (int start = 0; start < text.size();) {
@@ -115,6 +118,7 @@ public:
                 {QStringLiteral("typingStyle"), styleJson(m_typingStyle).toVariantMap()},
                 {QStringLiteral("fontFamily"), selected.family},
                 {QStringLiteral("fontSize"), selected.fontSize},
+                {QStringLiteral("rotation"), cell.rotation},
                 {QStringLiteral("bold"), selected.bold},
                 {QStringLiteral("italic"), selected.italic},
                 {QStringLiteral("underline"), selected.underline}};
@@ -123,6 +127,14 @@ public:
     QString apply(const QString &property, const QVariant &value)
     {
         synchronize();
+        if (property == QLatin1String("rotation")) {
+            bool numeric = false;
+            const double rotation = value.toDouble(&numeric);
+            if (!numeric || (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270))
+                return qtTrId("TableCellInvalidFormat");
+            textDocument()->setProperty(CellRotationProperty, static_cast<int>(rotation));
+            return {};
+        }
         if (property != QLatin1String("family") && property != QLatin1String("bold")
             && property != QLatin1String("italic") && property != QLatin1String("underline")
             && property != QLatin1String("fontSize"))

@@ -25,6 +25,7 @@ Item {
             editingState.editorState = snapshot
             editingState.fontFamily = snapshot.fontFamily
             editingState.fontSize = snapshot.fontSize
+            editingState.textRotation = snapshot.rotation
             editingState.bold = snapshot.bold
             editingState.italic = snapshot.italic
             editingState.underline = snapshot.underline
@@ -74,107 +75,120 @@ Item {
             color: "white"
         }
 
-        Flickable {
-            id: textViewport
-            x: 0
-            y: root.layoutScale
-            width: cellFrame.width / root.layoutScale
-            height: Math.max(1, cellFrame.height / root.layoutScale - 1)
-            scale: root.layoutScale
+        Item {
+            id: rotatedViewport
+            objectName: "tableCellRotatedViewport"
+            readonly property int textRotation: root.editingState.textRotation
+            readonly property bool sideways: textRotation === 90 || textRotation === 270
+            x: textRotation === 90 || textRotation === 180 ? cellFrame.width : 0
+            y: textRotation === 180 || textRotation === 270 ? cellFrame.height : 0
+            width: sideways ? cellFrame.height : cellFrame.width
+            height: sideways ? cellFrame.width : cellFrame.height
+            rotation: textRotation
             transformOrigin: Item.TopLeft
-            clip: true
-            contentWidth: width
-            contentHeight: Math.max(height, input.contentHeight)
-            boundsBehavior: Flickable.StopAtBounds
-            interactive: contentHeight > height
 
-            function revealCursor() {
-                const cursor = input.cursorRectangle
-                if (cursor.y < contentY)
-                    contentY = cursor.y
-                else if (cursor.y + cursor.height > contentY + height)
-                    contentY = cursor.y + cursor.height - height
-            }
+            Flickable {
+                id: textViewport
+                x: 0
+                y: root.layoutScale
+                width: rotatedViewport.width / root.layoutScale
+                height: Math.max(1, rotatedViewport.height / root.layoutScale - 1)
+                scale: root.layoutScale
+                transformOrigin: Item.TopLeft
+                clip: true
+                contentWidth: width
+                contentHeight: Math.max(height, input.contentHeight)
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
 
-            TextArea {
-                id: input
-                objectName: "tableCellTextInput"
-                property bool initialized: false
-                property bool synchronizing: false
-                width: textViewport.width
-                height: Math.max(textViewport.height, contentHeight)
-                padding: 0
-                background: null
-                color: "#000000"
-                selectionColor: "#f4ba83"
-                selectedTextColor: "#000000"
-                textFormat: TextEdit.PlainText
-                wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-                selectByMouse: true
-                persistentSelection: true
-                font: root.editingState.controller.fontForDisplay(
-                    root.editingState.cellFormat.defaultStyle.family || root.editingState.fontFamily,
-                    100, false, false, false, root.editingState.cellFormat.defaultStyle.fontSize || 12)
-                //% "Cell text"
-                Accessible.name: qsTrId("TableCellText")
-                onTextChanged: {
-                    if (initialized && !synchronizing) {
-                        root.editingState.errorText = ""
-                        Qt.callLater(root.synchronize)
+                function revealCursor() {
+                    const cursor = input.cursorRectangle
+                    if (cursor.y < contentY)
+                        contentY = cursor.y
+                    else if (cursor.y + cursor.height > contentY + height)
+                        contentY = cursor.y + cursor.height - height
+                }
+
+                TextArea {
+                    id: input
+                    objectName: "tableCellTextInput"
+                    property bool initialized: false
+                    property bool synchronizing: false
+                    width: textViewport.width
+                    height: Math.max(textViewport.height, contentHeight)
+                    padding: 0
+                    background: null
+                    color: "#000000"
+                    selectionColor: "#f4ba83"
+                    selectedTextColor: "#000000"
+                    textFormat: TextEdit.PlainText
+                    wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                    selectByMouse: true
+                    persistentSelection: true
+                    font: root.editingState.controller.fontForDisplay(
+                        root.editingState.cellFormat.defaultStyle.family || root.editingState.fontFamily,
+                        100, false, false, false, root.editingState.cellFormat.defaultStyle.fontSize || 12)
+                    //% "Cell text"
+                    Accessible.name: qsTrId("TableCellText")
+                    onTextChanged: {
+                        if (initialized && !synchronizing) {
+                            root.editingState.errorText = ""
+                            Qt.callLater(root.synchronize)
+                        }
                     }
-                }
-                onCursorPositionChanged: Qt.callLater(root.synchronize)
-                onSelectionStartChanged: Qt.callLater(root.synchronize)
-                onSelectionEndChanged: Qt.callLater(root.synchronize)
-                onActiveFocusChanged: {
-                    root.editingState.inputFocused = activeFocus
-                    if (!activeFocus)
+                    onCursorPositionChanged: Qt.callLater(root.synchronize)
+                    onSelectionStartChanged: Qt.callLater(root.synchronize)
+                    onSelectionEndChanged: Qt.callLater(root.synchronize)
+                    onActiveFocusChanged: {
+                        root.editingState.inputFocused = activeFocus
+                        if (!activeFocus)
+                            root.synchronize()
+                    }
+                    onCursorRectangleChanged: textViewport.revealCursor()
+                    Component.onCompleted: {
+                        text = root.editingState.text
+                        const saved = root.editingState.editorState
+                        const position = Math.min(Number(saved.cursorPosition ?? length), length)
+                        const start = Math.min(Number(saved.selectionStart ?? position), length)
+                        const end = Math.min(Number(saved.selectionEnd ?? position), length)
+                        select(position === start ? end : start, position === start ? start : end)
+                        root.editingState.controller.initializeTableCellEditor(textDocument,
+                            root.editingState.text, root.editingState.cellFormat, saved)
+                        initialized = true
                         root.synchronize()
-                }
-                onCursorRectangleChanged: textViewport.revealCursor()
-                Component.onCompleted: {
-                    text = root.editingState.text
-                    const saved = root.editingState.editorState
-                    const position = Math.min(Number(saved.cursorPosition ?? length), length)
-                    const start = Math.min(Number(saved.selectionStart ?? position), length)
-                    const end = Math.min(Number(saved.selectionEnd ?? position), length)
-                    select(position === start ? end : start, position === start ? start : end)
-                    root.editingState.controller.initializeTableCellEditor(textDocument,
-                        root.editingState.text, root.editingState.cellFormat, saved)
-                    initialized = true
-                    root.synchronize()
-                }
-                Component.onDestruction: {
-                    root.synchronize()
-                    initialized = false
-                }
-                Keys.onShortcutOverride: event => {
-                    const command = event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)
-                    event.accepted = !(command && (event.key === Qt.Key_S
-                        || event.key === Qt.Key_W || event.key === Qt.Key_O || event.key === Qt.Key_F))
-                }
-                Keys.onPressed: event => {
-                    const command = event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)
-                    if (command && event.key === Qt.Key_B) {
-                        root.applyFormatting("bold", !root.editingState.bold)
-                        event.accepted = true
-                    } else if (command && event.key === Qt.Key_I) {
-                        root.applyFormatting("italic", !root.editingState.italic)
-                        event.accepted = true
-                    } else if (command && event.key === Qt.Key_U) {
-                        root.applyFormatting("underline", !root.editingState.underline)
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_Escape) {
-                        root.editingState.cancel()
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                        root.editingState.advance(event.key === Qt.Key_Backtab
-                            || (event.modifiers & Qt.ShiftModifier))
-                        event.accepted = true
-                    } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                               && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier))) {
-                        root.editingState.commit()
-                        event.accepted = true
+                    }
+                    Component.onDestruction: {
+                        root.synchronize()
+                        initialized = false
+                    }
+                    Keys.onShortcutOverride: event => {
+                        const command = event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)
+                        event.accepted = !(command && (event.key === Qt.Key_S
+                            || event.key === Qt.Key_W || event.key === Qt.Key_O || event.key === Qt.Key_F))
+                    }
+                    Keys.onPressed: event => {
+                        const command = event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)
+                        if (command && event.key === Qt.Key_B) {
+                            root.applyFormatting("bold", !root.editingState.bold)
+                            event.accepted = true
+                        } else if (command && event.key === Qt.Key_I) {
+                            root.applyFormatting("italic", !root.editingState.italic)
+                            event.accepted = true
+                        } else if (command && event.key === Qt.Key_U) {
+                            root.applyFormatting("underline", !root.editingState.underline)
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Escape) {
+                            root.editingState.cancel()
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                            root.editingState.advance(event.key === Qt.Key_Backtab
+                                || (event.modifiers & Qt.ShiftModifier))
+                            event.accepted = true
+                        } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                   && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier))) {
+                            root.editingState.commit()
+                            event.accepted = true
+                        }
                     }
                 }
             }

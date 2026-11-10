@@ -1080,6 +1080,40 @@ QJsonObject readTableTestMetadata(const QString &sourcePath)
     return QJsonDocument::fromJson(bytes).object();
 }
 
+QVector<QPointF> tableCellTextDirections(const QString &sourcePath)
+{
+    PDFiumProcessLock lock;
+    const QByteArray filename = QFile::encodeName(sourcePath);
+    const auto document = FPDF_LoadDocument(filename.constData(), nullptr);
+    if (!document)
+        return {};
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    const auto page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return {};
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    const PDFShapeUtils::CoordinateMapper mapper(page,
+        QSizeF(FPDF_GetPageWidthF(page), FPDF_GetPageHeightF(page)));
+    QVector<QPointF> result;
+    for (int index = 0; index < FPDFPage_CountObjects(page); ++index) {
+        const auto object = FPDFPage_GetObject(page, index);
+        if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT || !PDFTableCellMetadata::hasMark(object))
+            continue;
+        FS_MATRIX matrix{};
+        QPointF origin, horizontal;
+        if (!FPDFPageObj_GetMatrix(object, &matrix)
+            || !mapper.devicePoint(QPointF(matrix.e, matrix.f), origin)
+            || !mapper.devicePoint(QPointF(matrix.e + matrix.a, matrix.f + matrix.b), horizontal))
+            return {};
+        const QPointF delta = horizontal - origin;
+        const qreal length = std::hypot(delta.x(), delta.y());
+        if (length < 0.00001)
+            return {};
+        result.append(delta / length);
+    }
+    return result;
+}
+
 bool rewriteTableTestMetadata(const QString &sourcePath, const QString &targetPath,
                               const QString &key, const QVariant &value)
 {
@@ -1363,6 +1397,31 @@ bool tamperTableCellObject(const QString &sourcePath, const QString &targetPath,
         FPDFPageObj_Destroy(cell);
     } else if (change == QLatin1String("moved-fragment")) {
         FPDFPageObj_Transform(cell, 1, 0, 0, 1, 20, 0);
+    } else if (change == QLatin1String("rotated-fragment")) {
+        FS_MATRIX matrix{};
+        if (!FPDFPageObj_GetMatrix(cell, &matrix))
+            return false;
+        std::swap(matrix.a, matrix.c);
+        std::swap(matrix.b, matrix.d);
+        if (!FPDFPageObj_SetMatrix(cell, &matrix))
+            return false;
+    } else if (change == QLatin1String("child-rotation")) {
+        const auto mark = FPDFPageObj_GetMark(cell, 0);
+        unsigned long length = 0;
+        if (!mark || !FPDFPageObjMark_GetParamBlobValue(mark, "Data", nullptr, 0, &length)
+            || length == 0 || length > 16 * 1024)
+            return false;
+        QByteArray bytes(qsizetype(length), Qt::Uninitialized);
+        if (!FPDFPageObjMark_GetParamBlobValue(mark, "Data",
+                reinterpret_cast<unsigned char *>(bytes.data()), length, &length))
+            return false;
+        auto data = QJsonDocument::fromJson(bytes).object();
+        data.insert(QStringLiteral("rotation"), 270);
+        bytes = QJsonDocument(data).toJson(QJsonDocument::Compact);
+        if (!FPDFPageObjMark_SetBlobParam(document, cell, mark, "Data",
+                reinterpret_cast<const unsigned char *>(bytes.constData()),
+                static_cast<unsigned long>(bytes.size())))
+            return false;
     } else if (change == QLatin1String("recolored-fragment")) {
         if (!FPDFPageObj_SetFillColor(cell, 255, 0, 0, 255))
             return false;
@@ -2105,6 +2164,228 @@ void PDFEditControllerTest::savesFormattedTableCellsRoundTrip()
     QVERIFY(reopened.save());
     QCOMPARE(topLevelPageObjectCount(saved), 0);
     QVERIFY(pageText(saved).trimmed().isEmpty());
+}
+
+void PDFEditControllerTest::editsTableCellRotationWithAtomicHistory()
+{
+    using namespace PDFTableCellFormat;
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("cell-rotation-history.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .25)).isEmpty());
+    const Style regular{testFontFamily()};
+    const QString text = QStringLiteral("Rotation");
+    Cell format = plain(text, regular);
+    format.rotation = 90;
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(format)).isEmpty());
+    const auto rotation = [&] {
+        return controller.selectedDraftPreview().value(QStringLiteral("tableCellFormats")).toList()
+            .value(0).toMap().value(QStringLiteral("rotation")).toInt();
+    };
+    QCOMPARE(rotation(), 90);
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(format)).isEmpty());
+    controller.undo(); // An identical rotation does not create an extra command.
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().isEmpty());
+    controller.redo();
+    QCOMPARE(rotation(), 90);
+    QVERIFY(controller.setSelectedTableCellText(0, 0, QStringLiteral("Changed")).isEmpty());
+    QCOMPARE(rotation(), 90); // Plain text changes retain the cell-level property.
+    controller.undo();
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList(), QStringList{text});
+    const QVariantMap before = controller.selectedDraftPreview();
+    for (const QVariant &angle : {QVariant(-90), QVariant(45), QVariant(360), QVariant(90.5),
+                                  QVariant(QStringLiteral("90")), QVariant(true)}) {
+        QVariantMap invalid = toVariant(format);
+        invalid[QStringLiteral("rotation")] = angle;
+        QVERIFY2(!controller.setSelectedTableCellContent(0, 0, text, invalid).isEmpty(), qPrintable(angle.toString()));
+        QCOMPARE(controller.selectedDraftPreview(), before);
+    }
+    Cell empty = plain(QString(), regular);
+    empty.rotation = 270;
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, QString(), toVariant(empty)).isEmpty());
+    QCOMPARE(rotation(), 270);
+    controller.undo();
+    QCOMPARE(rotation(), 90);
+    // The rotated layout has a tall logical frame; the unrotated frame is too short.
+    const QString lines = QStringLiteral("x\n").repeated(14) + QStringLiteral("x");
+    Cell tall = plain(lines, regular);
+    QVERIFY(!controller.setSelectedTableCellContent(0, 0, lines, toVariant(tall)).isEmpty());
+    tall.rotation = 90;
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, lines, toVariant(tall)).isEmpty());
+    QCOMPARE(rotation(), 90);
+    controller.undo();
+    QCOMPARE(controller.selectedDraftPreview(), before);
+    controller.undo();
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::savesRotatedTableCellsRoundTrip_data()
+{
+    QTest::addColumn<int>("pageRotation");
+    QTest::addColumn<int>("cellRotation");
+    for (int pageRotation : {0, 1}) {
+        for (int cellRotation : {0, 90, 180, 270})
+            QTest::newRow(qPrintable(QStringLiteral("page-%1-cell-%2").arg(pageRotation * 90).arg(cellRotation)))
+                << pageRotation << cellRotation;
+    }
+}
+
+void PDFEditControllerTest::savesRotatedTableCellsRoundTrip()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(int, pageRotation);
+    QFETCH(int, cellRotation);
+    const QString suffix = QStringLiteral("%1-%2").arg(pageRotation).arg(cellRotation);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("rotated-cell-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("rotated-cell-saved-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(path, pageRotation));
+    const QString alternate = QStringLiteral("TrePDFRotatedCellAlternate");
+    QString fontError;
+    QVERIFY2(ApplicationFonts::installDownloadedFont(renamedTestFontData(alternate, false, true),
+        alternate, false, true, uint('a'), fontError), qPrintable(fontError));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(4);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    const QString text = QStringLiteral("Plain Bold Italic Under\nNext");
+    const Style regular{testFontFamily()};
+    Cell format{regular, {{0, 6, {regular.family, false, false, false, 9}},
+        {6, 5, {regular.family, true, false, false, 18}},
+        {11, 7, {alternate, false, true, false, 16}},
+        {18, int(text.size()) - 18, {regular.family, false, false, true, 20}}}};
+    format.rotation = cellRotation;
+    const QString spaces = QStringLiteral("   ");
+    Cell spaceFormat = plain(spaces, {regular.family, false, false, true, 24});
+    spaceFormat.rotation = cellRotation;
+    Cell empty{{regular.family, true, true, true, 22}, {}};
+    empty.rotation = cellRotation;
+    const QString error = controller.setSelectedTableCellContent(0, 0, text, toVariant(format));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(controller.setSelectedTableCellContent(1, 0, spaces, toVariant(spaceFormat)).isEmpty());
+    QVERIFY(controller.setSelectedTableCellContent(2, 0, QString(), toVariant(empty)).isEmpty());
+    const QString zeroText = QStringLiteral("Zero");
+    const Cell zeroFormat = plain(zeroText, regular);
+    QVERIFY(controller.setSelectedTableCellContent(3, 0, zeroText, toVariant(zeroFormat)).isEmpty());
+    const QVariantList expected{toVariant(format), toVariant(spaceFormat), toVariant(empty), toVariant(zeroFormat)};
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(readTableTestMetadata(saved).value(QStringLiteral("version")).toInt(), cellRotation ? 8 : 6);
+    const auto directions = tableCellTextDirections(saved);
+    QVERIFY(!directions.isEmpty());
+    const QPointF expectedDirection = cellRotation == 0 ? QPointF(1, 0)
+        : cellRotation == 90 ? QPointF(0, 1) : cellRotation == 180 ? QPointF(-1, 0) : QPointF(0, -1);
+    for (qsizetype index = 0; index < directions.size(); ++index) {
+        const QPointF expected = index + 1 == directions.size() ? QPointF(1, 0) : expectedDirection;
+        QVERIFY2(QLineF(directions[index], expected).length() < .001,
+            "PDF text axes must rotate in displayed page coordinates without rotating neighboring cells.");
+    }
+    QVERIFY(pageText(saved).contains(QStringLiteral("Plain")));
+    const auto bold = textObjectFontInfo(saved, QStringLiteral("Bold"));
+    QVERIFY(bold.found && bold.weight >= 600 && bold.embedded == 1);
+    const auto italic = textObjectFontInfo(saved, QStringLiteral("Italic"));
+    QVERIFY(italic.found && italic.italic);
+    QCOMPARE(italic.familyName, alternate);
+    QCOMPARE(tableTextFontSizes(saved), QSet<int>({9, 12, 16, 18, 20, 24}));
+    QVERIFY(inspectShapePaths(saved).count > 2);
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    auto candidates = waitForCandidates(reopened, 0);
+    auto table = candidateForKind(candidates, QStringLiteral("sourceShape"));
+    QVERIFY2(!table.isEmpty(), "Rotated text, spaces and underline children must remain one editable table.");
+    QCOMPARE(table.value(QStringLiteral("tableCellTexts")).toStringList(), QStringList({text, spaces, QString(), zeroText}));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList(), expected);
+    for (const auto &candidate : candidates) {
+        if (candidate.toMap().value(QStringLiteral("objectId")) != table.value(QStringLiteral("objectId")))
+            QVERIFY(!candidate.toMap().value(QStringLiteral("editable")).toBool());
+    }
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    reopened.beginSelectedFrameResize();
+    reopened.updateSelectedTableDivider(false, 0, .4);
+    reopened.updateSelectedFrameRect(QRectF(.12, .12, .75, .75));
+    reopened.finishSelectedFrameResize();
+    QVERIFY(reopened.save());
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList(), expected);
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    const QString changed = QStringLiteral("Changed");
+    Cell changedFormat = plain(changed, regular);
+    changedFormat.rotation = cellRotation;
+    QVERIFY(reopened.setSelectedTableCellContent(0, 0, changed, toVariant(changedFormat)).isEmpty());
+    QVERIFY(reopened.save());
+    QVERIFY(pageText(saved).contains(changed));
+    QVERIFY(!pageText(saved).contains(QStringLiteral("Under")));
+    QCOMPARE(inspectShapePaths(saved).count, 2); // Only the grid and spaces' underline remain.
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList().at(2).toMap(), toVariant(empty));
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    reopened.deleteSelectedObject();
+    reopened.undo();
+    QVERIFY(!reopened.hasDrafts());
+    reopened.redo();
+    QVERIFY(reopened.save());
+    QCOMPARE(topLevelPageObjectCount(saved), 0);
+    QVERIFY(pageText(saved).trimmed().isEmpty());
+}
+
+void PDFEditControllerTest::rejectsTamperedTableCellRotation_data()
+{
+    QTest::addColumn<QString>("change");
+    for (const auto *change : {"invalid-angle", "missing-angle", "parent-rotation",
+                               "legacy-rotation", "child-rotation", "rotated-fragment"})
+        QTest::newRow(change) << QString::fromLatin1(change);
+}
+
+void PDFEditControllerTest::rejectsTamperedTableCellRotation()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(QString, change);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("rotation-valid-%1.pdf").arg(change));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("rotation-saved-%1.pdf").arg(change));
+    const QString tampered = m_temporaryDirectory.filePath(QStringLiteral("rotation-tampered-%1.pdf").arg(change));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .9)).isEmpty());
+    const QString text = QStringLiteral("Rotated");
+    Cell format = plain(text, {testFontFamily(), false, false, true});
+    format.rotation = 90;
+    QVERIFY(controller.setSelectedTableCellContent(0, 0, text, toVariant(format)).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    if (change == QLatin1String("child-rotation") || change == QLatin1String("rotated-fragment")) {
+        QVERIFY(tamperTableCellObject(saved, tampered, change));
+    } else if (change == QLatin1String("legacy-rotation")) {
+        QVERIFY(rewriteTableTestMetadata(saved, tampered, QStringLiteral("version"), 6));
+    } else {
+        auto altered = toVariant(format);
+        if (change == QLatin1String("missing-angle"))
+            altered.remove(QStringLiteral("rotation"));
+        else
+            altered[QStringLiteral("rotation")] = change == QLatin1String("invalid-angle") ? 45 : 270;
+        QVERIFY(rewriteTableTestMetadata(saved, tampered, QStringLiteral("cellFormats"), QVariantList{altered}));
+    }
+    QVERIFY(document.open(QUrl::fromLocalFile(tampered)));
+    const auto candidates = waitForCandidates(controller, 0);
+    QVERIFY(candidateForKind(candidates, QStringLiteral("sourceShape")).isEmpty());
+    for (const auto &candidate : candidates)
+        QVERIFY(!candidate.toMap().value(QStringLiteral("editable")).toBool());
 }
 
 void PDFEditControllerTest::reopensTableCellsWithGeneratedSpacing_data()
@@ -3300,6 +3581,33 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QVERIFY(PDFTableCellFormat::styleAt(inlineFormat(), 10).underline);
     QVERIFY(!PDFTableCellFormat::styleAt(inlineFormat(), 6).bold);
     QCOMPARE(PDFTableCellFormat::styleAt(inlineFormat(), 10).fontSize, 16);
+    const auto beforeRotation = inlineFormat();
+    auto *rotationBox = itemNamed(QStringLiteral("tableCellRotationBox"));
+    QVERIFY(rotationBox && rotationBox->isEnabled());
+    QVERIFY(rotationBox->setProperty("currentIndex", 1));
+    QVERIFY(QMetaObject::invokeMethod(rotationBox, "activated", Q_ARG(int, 1)));
+    QTRY_COMPARE(inlineFormat().rotation, 90);
+    QCOMPARE(inlineFormat().spans, beforeRotation.spans);
+    QCOMPARE(inlineFormat().defaultStyle, beforeRotation.defaultStyle);
+    for (const int index : {2, 3, 1}) {
+        QVERIFY(rotationBox->setProperty("currentIndex", index));
+        QVERIFY(QMetaObject::invokeMethod(rotationBox, "activated", Q_ARG(int, index)));
+        QTRY_COMPARE(inlineFormat().rotation, index * 90);
+        QCOMPARE(inlineFormat().spans, beforeRotation.spans);
+        auto *viewport = itemNamed(QStringLiteral("tableCellRotatedViewport"));
+        auto *frame = itemNamed(QStringLiteral("tableCellInlineEditor"));
+        QVERIFY(viewport && frame);
+        QTRY_COMPARE(viewport->rotation(), qreal(index * 90));
+        const QRectF transformed = viewport->mapRectToItem(frame,
+            QRectF(0, 0, viewport->width(), viewport->height()));
+        QVERIFY(QLineF(transformed.topLeft(), QPointF()).length() < .01);
+        QVERIFY(QLineF(transformed.bottomRight(), QPointF(frame->width(), frame->height())).length() < .01);
+    }
+    const auto rotatedSnapshot = inlineState();
+    QVERIFY(!controller.applyTableCellEditorFormat(
+        cellInput->property("textDocument").value<QQuickTextDocument *>(),
+        QStringLiteral("rotation"), 45).isEmpty());
+    QCOMPARE(inlineState(), rotatedSnapshot);
     QVariantMap formattedSnapshot = inlineState().value(QStringLiteral("format")).toMap();
     if (!screenshotPrefix.isEmpty()) {
         QTest::qWait(100);
@@ -3313,6 +3621,8 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QVERIFY(overlay->setProperty("pooled", false));
     QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
     QTRY_COMPARE(inlineState().value(QStringLiteral("format")).toMap(), formattedSnapshot);
+    QCOMPARE(inlineFormat().rotation, 90);
+    QCOMPARE(itemNamed(QStringLiteral("tableCellRotationBox"))->property("currentIndex").toInt(), 1);
     QCOMPARE(cellInput->property("cursorPosition").toInt(), 11);
     QTRY_COMPARE(inlineState().value(QStringLiteral("fontSize")).toInt(), 20);
     cellInput->forceActiveFocus();

@@ -652,13 +652,15 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
     const bool customTableStops = table
         && (!metadata.tableRowStops.isEmpty() || !metadata.tableColumnStops.isEmpty());
     const bool tableCells = table && !metadata.tableId.isEmpty();
+    const bool rotatedCells = std::any_of(metadata.tableCellFormats.cbegin(),
+        metadata.tableCellFormats.cend(), [](const auto &cell) { return cell.rotation != 0; });
     const QJsonArray signature = physicalSignature(
         path, table ? kMaximumTableSegments : kMaximumSegments);
     if (signature.isEmpty()) {
         return {};
     }
     QJsonObject object{
-        {QStringLiteral("version"), metadata.tableFrameOnly ? 7 : !metadata.tableCellFormats.isEmpty() ? 6
+        {QStringLiteral("version"), metadata.tableFrameOnly ? 7 : rotatedCells ? 8 : !metadata.tableCellFormats.isEmpty() ? 6
             : tableCells ? 4 : customTableStops ? 3 : table ? 2 : 1},
         {QStringLiteral("type"), metadata.type},
         {QStringLiteral("frame"), QJsonArray{metadata.frame.x(), metadata.frame.y(),
@@ -697,7 +699,7 @@ inline QByteArray encodeMetadata(const Metadata &metadata,
             if (!metadata.tableCellFormats.isEmpty()) {
                 QJsonArray formats;
                 for (const auto &cell : metadata.tableCellFormats)
-                    formats.append(PDFTableCellFormat::toJson(cell));
+                    formats.append(PDFTableCellFormat::toJson(cell, rotatedCells));
                 object.insert(QStringLiteral("cellFormats"), formats);
             }
         }
@@ -756,7 +758,7 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
     const QJsonValue versionValue = object.value(QStringLiteral("version"));
     const int version = versionValue.toInt(-1);
     if (!versionValue.isDouble() || versionValue.toDouble() != version
-        || (version < 1 || version > 7)
+        || (version < 1 || version > 8)
         || ((version < 4 || version == 7) && raw.size() > 16 * 1024)
         || object.size() != (version == 7 ? 15 : version >= 5 ? 19 : version == 4 ? 18 : version == 3 ? 14 : version == 2 ? 12 : 10)
         || !object.value(QStringLiteral("stroke")).isString()
@@ -820,7 +822,7 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
             parsed.tableRowStops = numbers(rowStops, parsed.tableRows - 1);
             parsed.tableColumnStops = numbers(columnStops, parsed.tableColumns - 1);
         }
-        if (version >= 4 && version <= 6) {
+        if (version >= 4 && version != 7) {
             if (!object.value(QStringLiteral("id")).isString()
                 || !object.value(QStringLiteral("font")).isString()
                 || !object.value(QStringLiteral("cells")).isArray()
@@ -848,7 +850,9 @@ inline bool readMetadata(FPDF_PAGE page, const QSizeF &pageSize,
                     const auto value = formats.toArray().at(cell);
                     if (!value.isObject() || !PDFTableCellFormat::fromJson(
                             value.toObject(), parsed.tableCellTexts[cell], format,
-                            PDFTableCellFormat::MaximumSpansPerCell, version >= 6))
+                            PDFTableCellFormat::MaximumSpansPerCell, version >= 6, version == 8))
+                        return false;
+                    if (version < 8 && format.rotation != 0)
                         return false;
                     if (version == 5 && (format.defaultStyle.fontSize != 12.0
                         || std::any_of(format.spans.cbegin(), format.spans.cend(),
