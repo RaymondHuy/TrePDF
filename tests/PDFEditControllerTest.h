@@ -566,6 +566,11 @@ private slots:
     void rejectsTableCellInkOverflowAndPreservesPaddedText();
     void savesFormattedTableCellsRoundTrip_data();
     void savesFormattedTableCellsRoundTrip();
+    void editsTableCellRotationWithAtomicHistory();
+    void savesRotatedTableCellsRoundTrip_data();
+    void savesRotatedTableCellsRoundTrip();
+    void rejectsTamperedTableCellRotation_data();
+    void rejectsTamperedTableCellRotation();
     void reopensTableCellsWithGeneratedSpacing_data();
     void reopensTableCellsWithGeneratedSpacing();
     void savesUnderlinedTableSpaces();

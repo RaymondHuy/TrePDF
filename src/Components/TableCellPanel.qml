@@ -283,6 +283,36 @@ Rectangle {
                 }
             }
 
+            Label {
+                Layout.fillWidth: true
+                //% "Cell text rotation"
+                text: qsTrId("TableCellRotation")
+                color: root.theme.ribbonTextColor
+                font.pixelSize: 12
+                font.weight: Font.Medium
+            }
+
+            ComboBox {
+                id: rotationBox
+                objectName: "tableCellRotationBox"
+                Layout.fillWidth: true
+                enabled: root.editorAvailable
+                model: ["0°", "90°", "180°", "270°"]
+                currentIndex: root.editingState.textRotation / 90
+                //% "Cell text rotation"
+                Accessible.name: qsTrId("TableCellRotation")
+                onActivated: index => root.applyFormatting("rotation", index * 90)
+            }
+
+            Label {
+                Layout.fillWidth: true
+                //% "Rotates all text in this cell clockwise."
+                text: qsTrId("TableCellRotationHint")
+                color: "#747176"
+                font.pixelSize: 11
+                wrapMode: Text.Wrap
+            }
+
             Button {
                 objectName: "tableCellRevealButton"
                 Layout.fillWidth: true

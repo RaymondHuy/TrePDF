@@ -31,6 +31,8 @@ struct Span {
 struct Cell {
     Style defaultStyle;
     QVector<Span> spans;
+    // Clockwise in displayed page coordinates; applies to the entire cell.
+    int rotation = 0;
     bool operator==(const Cell &) const = default;
 };
 using Cells = QVector<Cell>;
@@ -38,6 +40,11 @@ using Cells = QVector<Cell>;
 inline bool validFontSize(qreal size)
 {
     return std::isfinite(size) && size >= 1.0 && size <= 512.0 && size == std::floor(size);
+}
+
+inline bool validRotation(int rotation)
+{
+    return rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270;
 }
 
 inline bool validStyle(const Style &style)
@@ -62,7 +69,8 @@ inline Cell plain(const QString &text, const Style &style)
 
 inline bool valid(const Cell &cell, const QString &text, int maximumSpans = MaximumSpansPerCell)
 {
-    if (!validStyle(cell.defaultStyle) || cell.spans.size() > maximumSpans)
+    if (!validStyle(cell.defaultStyle) || !validRotation(cell.rotation)
+        || cell.spans.size() > maximumSpans)
         return false;
     int end = 0;
     for (const auto &span : cell.spans) {
@@ -129,7 +137,7 @@ inline bool readStyle(const QJsonObject &object, Style &style, bool requireFontS
     return validStyle(style);
 }
 
-inline QJsonObject toJson(const Cell &cell)
+inline QJsonObject toJson(const Cell &cell, bool includeRotation = true)
 {
     QJsonArray spans;
     for (const auto &span : cell.spans) {
@@ -138,14 +146,25 @@ inline QJsonObject toJson(const Cell &cell)
         object.insert(QStringLiteral("length"), span.length);
         spans.append(object);
     }
-    return {{QStringLiteral("defaultStyle"), styleJson(cell.defaultStyle)},
-            {QStringLiteral("spans"), spans}};
+    QJsonObject result{{QStringLiteral("defaultStyle"), styleJson(cell.defaultStyle)},
+                       {QStringLiteral("spans"), spans}};
+    if (includeRotation)
+        result.insert(QStringLiteral("rotation"), cell.rotation);
+    return result;
 }
 
 inline bool fromJson(const QJsonObject &object, const QString &text, Cell &cell,
-                     int maximumSpans = MaximumSpansPerCell, bool requireFontSize = false)
+                     int maximumSpans = MaximumSpansPerCell, bool requireFontSize = false,
+                     bool requireRotation = false)
 {
     Cell result;
+    const auto rotation = object.value(QStringLiteral("rotation"));
+    if (requireRotation || !rotation.isUndefined()) {
+        if (!rotation.isDouble() || rotation.toDouble() != rotation.toInt(-1)
+            || !validRotation(rotation.toInt(-1)))
+            return false;
+        result.rotation = rotation.toInt();
+    }
     if (!object.value(QStringLiteral("defaultStyle")).isObject()
         || !readStyle(object.value(QStringLiteral("defaultStyle")).toObject(), result.defaultStyle, requireFontSize)
         || !object.value(QStringLiteral("spans")).isArray())

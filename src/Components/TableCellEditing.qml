@@ -26,6 +26,7 @@ QtObject {
     property rect cellRect: Qt.rect(0, 0, 0, 0)
     property string fontFamily: ""
     property real fontSize: 12
+    property int textRotation: 0
     property int focusGeneration: 0
     property bool inputFocused: false
     property TableCellEditor editorItem: null
@@ -70,6 +71,7 @@ QtObject {
                 underline: false, fontSize: fontSize }] : []
         }
         const initialStyle = cellFormat.defaultStyle
+        textRotation = Number(cellFormat.rotation || 0)
         bold = initialStyle.bold
         italic = initialStyle.italic
         underline = initialStyle.underline

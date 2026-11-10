@@ -7,6 +7,7 @@
 #include <QRectF>
 #include <QString>
 #include <QTextLayout>
+#include <QTransform>
 #include <QVector>
 #include <algorithm>
 #include <cmath>
@@ -16,6 +17,24 @@ inline constexpr int MaximumCellCharacters = 1024;
 inline constexpr int MaximumTableCharacters = 8192;
 inline constexpr qreal CellPadding = 3.0;
 inline constexpr qreal InkOverhang = 2.5;
+
+inline QSizeF layoutSize(const QSizeF &cellSize, int rotation)
+{
+    return rotation == 90 || rotation == 270
+        ? QSizeF(cellSize.height(), cellSize.width()) : cellSize;
+}
+
+// Maps unrotated text-layout coordinates into the padded cell on the displayed
+// page. A right-angle turn changes the layout dimensions, not the font size.
+inline QTransform cellTransform(const QRectF &cell, int rotation)
+{
+    switch (rotation) {
+    case 90: return QTransform(0, 1, -1, 0, cell.right(), cell.top());
+    case 180: return QTransform(-1, 0, 0, -1, cell.right(), cell.bottom());
+    case 270: return QTransform(0, -1, 1, 0, cell.left(), cell.bottom());
+    default: return QTransform::fromTranslate(cell.left(), cell.top());
+    }
+}
 
 inline bool validText(const QString &text)
 {
@@ -90,11 +109,14 @@ inline bool lineInkFits(const QTextLine &line, qreal top, const QSizeF &size)
     return true;
 }
 
-inline bool fits(const QString &text, const QFont &font, const QSizeF &size,
+inline bool fits(const QString &text, const QFont &font, const QSizeF &cellSize,
                  const PDFTableCellFormat::Cell &format = {})
 {
+    if (!PDFTableCellFormat::validRotation(format.rotation))
+        return false;
     if (text.isEmpty())
         return true;
+    const QSizeF size = layoutSize(cellSize, format.rotation);
     if (!validText(text) || size.isEmpty())
         return false;
     qreal height = 1.0; // The added-text writer starts one point below its frame.

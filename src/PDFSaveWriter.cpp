@@ -220,6 +220,8 @@ struct SaveDraft {
     qreal tableFontSize = 12.0;
     QString tableId;
     int tableCellIndex = -1;
+    bool rotatedTableCells = false;
+    QTransform tableCellTransform;
     QVector<QVector<int>> tableCellObjectPaths;
     bool tableFrameOnly = false;
     QVector<QVector<int>> sourceTableFrameObjectPaths;
@@ -543,14 +545,18 @@ public:
                     qreal baselineFromTop,
                     qreal horizontalScale,
                     qreal textShear,
-                    FS_MATRIX &matrix) const
+                    FS_MATRIX &matrix,
+                    const QTransform &displayTransform = {}) const
     {
         QPointF origin;
         QPointF deviceRight;
         QPointF deviceUp;
-        if (!qIsFinite(textShear) || !pagePoint(x, baselineFromTop, origin)
-            || !pagePoint(x + 1.0, baselineFromTop, deviceRight)
-            || !pagePoint(x, baselineFromTop - 1.0, deviceUp)) {
+        const QPointF localOrigin = displayTransform.map(QPointF(x, baselineFromTop));
+        const QPointF localRight = displayTransform.map(QPointF(x + 1.0, baselineFromTop));
+        const QPointF localUp = displayTransform.map(QPointF(x, baselineFromTop - 1.0));
+        if (!qIsFinite(textShear) || !pagePoint(localOrigin.x(), localOrigin.y(), origin)
+            || !pagePoint(localRight.x(), localRight.y(), deviceRight)
+            || !pagePoint(localUp.x(), localUp.y(), deviceUp)) {
             return false;
         }
 
@@ -3403,7 +3409,8 @@ bool markUnderlinePair(FPDF_DOCUMENT document,
 
 FPDF_PAGEOBJECT createUnderline(const LayoutRun &run,
                                 qreal fontSize,
-                                const PageCoordinateMapper &coordinateMapper)
+                                const PageCoordinateMapper &coordinateMapper,
+                                const QTransform &displayTransform = {})
 {
     const qreal underlineY = run.baselineFromTop
         + qMax<qreal>(0.8, fontSize * 0.10);
@@ -3413,8 +3420,10 @@ FPDF_PAGEOBJECT createUnderline(const LayoutRun &run,
         - run.format.textShear * (underlineY - run.baselineFromTop);
     QPointF start;
     QPointF end;
-    if (!coordinateMapper.pagePoint(underlineX, underlineY, start)
-        || !coordinateMapper.pagePoint(underlineX + run.width, underlineY, end)) {
+    const QPointF displayStart = displayTransform.map(QPointF(underlineX, underlineY));
+    const QPointF displayEnd = displayTransform.map(QPointF(underlineX + run.width, underlineY));
+    if (!coordinateMapper.pagePoint(displayStart.x(), displayStart.y(), start)
+        || !coordinateMapper.pagePoint(displayEnd.x(), displayEnd.y(), end)) {
         return nullptr;
     }
     FPDF_PAGEOBJECT path = FPDFPageObj_CreateNewPath(
@@ -3682,6 +3691,8 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             draft.tableRows, draft.tableColumns, draft.tableRowStops, draft.tableColumnStops);
         if (cells.size() != draft.tableCellTexts.size())
             return failure(PDFSaveWriter::Error::ShapeObjectCreationFailed, draft.page, draft.objectId);
+        const bool rotatedCells = std::any_of(draft.tableCellFormats.cbegin(),
+            draft.tableCellFormats.cend(), [](const auto &cell) { return cell.rotation != 0; });
         for (int cell = 0; cell < cells.size(); ++cell) {
             if (draft.tableCellTexts[cell].isEmpty())
                 continue;
@@ -3700,7 +3711,16 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             textDraft.preservePhysicalFontSizes = true;
             textDraft.tableId = draft.tableId;
             textDraft.tableCellIndex = cell;
-            const QSizeF cellSize(cells[cell].width() * pageWidth, cells[cell].height() * pageHeight);
+            QSizeF cellSize(cells[cell].width() * pageWidth, cells[cell].height() * pageHeight);
+            if (rotatedCells) {
+                const int rotation = draft.tableCellFormats[cell].rotation;
+                textDraft.rotatedTableCells = true;
+                textDraft.tableCellTransform = PDFTableCellLayout::cellTransform(
+                    QRectF(QPointF(cells[cell].x() * pageWidth, cells[cell].y() * pageHeight), cellSize),
+                    rotation);
+                cellSize = PDFTableCellLayout::layoutSize(cellSize, rotation);
+                textDraft.frameRect = QRectF(0, 0, cellSize.width() / pageWidth, cellSize.height() / pageHeight);
+            }
             if (!tableCellDraftFits(textDraft, cellSize, pageHeight))
                 return failure(PDFSaveWriter::Error::TextObjectCreationFailed, draft.page, draft.objectId);
             result = createDraftObjects(document, page, textDraft, pageWidth, pageHeight,
@@ -3990,7 +4010,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                 run.baselineFromTop,
                 horizontalScale,
                 run.format.textShear,
-                matrix)
+                matrix, draft.tableCellTransform)
             && FPDFPageObj_SetMatrix(textObject, &matrix);
         if (configured) {
             configured = draft.tableCellIndex >= 0
@@ -3998,7 +4018,7 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
                     draft.tableCellIndex, tableFragmentIndex++, int(runs.size()),
                     int(run.textStart), int(run.textLength), run.text,
                     fontResolver.tableFontFingerprints(), draft.tableCellFormats.isEmpty()
-                        ? nullptr : &draft.tableCellFormats.constFirst())
+                        ? nullptr : &draft.tableCellFormats.constFirst(), draft.rotatedTableCells)
                 : (markTextSpacing(document, textObject, run, pageHeight, originOffset)
                    && markParagraphLayout(document, textObject, run,
                                           pageWidth, pageHeight, originOffset)
@@ -4017,12 +4037,12 @@ PDFSaveWriter::Result createDraftObjects(FPDF_DOCUMENT document,
             FPDF_PAGEOBJECT underline = createUnderline(
                 run,
                 fontSize,
-                coordinateMapper);
+                coordinateMapper, draft.tableCellTransform);
             const bool marked = underline && (draft.tableCellIndex >= 0
                 ? PDFTableCellMetadata::writeUnderline(document, underline, draft.tableId,
                     draft.tableCellIndex, tableFragmentIndex - 1, int(runs.size()),
                     int(run.textStart), int(run.textLength), run.text,
-                    draft.tableCellFormats.constFirst())
+                    draft.tableCellFormats.constFirst(), draft.rotatedTableCells)
                 : markUnderlinePair(document, textObject, underline));
             if (!marked) {
                 if (underline) {

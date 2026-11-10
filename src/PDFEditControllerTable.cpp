@@ -60,7 +60,7 @@ void appendSpan(Cell &cell, int start, int length, const Style &style)
 QString normalizedCell(const QString &text, Cell &format)
 {
     QString normalized;
-    Cell result{format.defaultStyle, {}};
+    Cell result{format.defaultStyle, {}, format.rotation};
     QTextBoundaryFinder boundaries(QTextBoundaryFinder::Grapheme, text);
     int start = 0;
     for (int end = boundaries.toNextBoundary(); end >= 0; end = boundaries.toNextBoundary()) {
@@ -126,6 +126,7 @@ QString PDFEditController::setSelectedTableCellContent(int row, int column, cons
         ? plain(before.tableCellTexts.isEmpty() ? QString() : before.tableCellTexts.at(index), fallback)
         : before.tableCellFormats.at(index);
     Cell format = plain(text, previous.defaultStyle);
+    format.rotation = previous.rotation;
     if (!formatMap.isEmpty() && !fromVariant(formatMap, text, format)) {
         //% "The cell formatting is invalid or too complex. Use fewer font or style changes."
         return qtTrId("TableCellInvalidFormat");
