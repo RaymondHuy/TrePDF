@@ -125,6 +125,7 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool clipboardHasImage READ clipboardHasImage NOTIFY clipboardImageChanged FINAL)
     Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingPropertiesEditable READ selectedDrawingPropertiesEditable NOTIFY selectionChanged FINAL)
+    Q_PROPERTY(bool selectedTableFrameOnly READ selectedTableFrameOnly NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingSupportsFill READ selectedDrawingSupportsFill NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QColor selectedDrawingStrokeColor READ selectedDrawingStrokeColor NOTIFY selectionChanged FINAL)
     Q_PROPERTY(QColor selectedDrawingInteriorColor READ selectedDrawingInteriorColor NOTIFY selectionChanged FINAL)
@@ -355,6 +356,7 @@ public:
     Q_INVOKABLE QVariantMap pasteImageFromClipboard(int page);
     bool selectedDeletable() const;
     bool selectedDrawingPropertiesEditable() const;
+    bool selectedTableFrameOnly() const;
     bool selectedDrawingSupportsFill() const;
     QColor selectedDrawingStrokeColor() const;
     QColor selectedDrawingInteriorColor() const;
@@ -827,6 +829,8 @@ private:
         ShapeType shapeType = RectangleShape;
         int tableRows = 0;
         int tableColumns = 0;
+        bool tableFrameOnly = false;
+        QVector<QVector<int>> sourceTableFrameObjectPaths;
         // Interior dividers relative to the grid's inner frame; empty means equal cells.
         QVector<qreal> tableRowStops;
         QVector<qreal> tableColumnStops;

@@ -862,6 +862,11 @@ QString PDFEditController::selectedReason() const
     return m_hasSelection ? m_selectedCandidate.reason : QString();
 }
 
+bool PDFEditController::selectedTableFrameOnly() const
+{
+    return m_hasSelection && m_selectedCandidate.tableFrameOnly;
+}
+
 QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
 {
     ensureCacheRevision();
@@ -930,6 +935,33 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
                 pageSize,
                 point)) {
             return;
+        }
+
+        // Imported frames own only the rules, leaving the cell interiors and
+        // their independent source text available to normal hit testing.
+        if (candidate.tableFrameOnly) {
+            const qreal stroke = shapeStrokeWidthPoints(candidate.shapeStrokeWidthRatio, pageSize.height());
+            const qreal tolerance = shapeHitTolerancePoints(candidate.shapeStrokeWidthRatio, pageSize.height());
+            const QRectF frame(candidateRect.x() * pageSize.width(), candidateRect.y() * pageSize.height(),
+                               candidateRect.width() * pageSize.width(), candidateRect.height() * pageSize.height());
+            const qreal inset = std::min({stroke / 2, frame.width() / 4, frame.height() / 4});
+            const QRectF inner = frame.adjusted(inset, inset, -inset, -inset);
+            const QPointF physical(point.x() * pageSize.width(), point.y() * pageSize.height());
+            const auto &rows = draft != m_drafts.cend() ? draft->tableRowStops : candidate.tableRowStops;
+            const auto &columns = draft != m_drafts.cend() ? draft->tableColumnStops : candidate.tableColumnStops;
+            bool onRule = false;
+            for (int row = 0; row <= candidate.tableRows; ++row) {
+                const qreal ratio = row == 0 ? 0.0 : row == candidate.tableRows ? 1.0
+                    : rows.isEmpty() ? qreal(row) / candidate.tableRows : rows.at(row - 1);
+                onRule = onRule || std::abs(physical.y() - inner.top() - ratio * inner.height()) <= tolerance;
+            }
+            for (int column = 0; column <= candidate.tableColumns; ++column) {
+                const qreal ratio = column == 0 ? 0.0 : column == candidate.tableColumns ? 1.0
+                    : columns.isEmpty() ? qreal(column) / candidate.tableColumns : columns.at(column - 1);
+                onRule = onRule || std::abs(physical.x() - inner.left() - ratio * inner.width()) <= tolerance;
+            }
+            if (!onRule)
+                return;
         }
 
         const qreal area = candidateRect.width() * candidateRect.height();

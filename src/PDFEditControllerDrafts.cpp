@@ -128,6 +128,7 @@ QVector<QVector<int>> PDFEditController::draftedTextObjectPathsForPage(int page)
                 objectPaths.append(candidate.objectPath);
             }
             objectPaths.append(candidate.tableCellObjectPaths);
+            objectPaths.append(candidate.sourceTableFrameObjectPaths);
         }
     }
 
@@ -808,6 +809,7 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
     map.insert(QStringLiteral("shapeStart"), candidate.shapeStartRatio);
     map.insert(QStringLiteral("shapeEnd"), candidate.shapeEndRatio);
     map.insert(QStringLiteral("tableRows"), candidate.tableRows);
+    map.insert(QStringLiteral("tableFrameOnly"), candidate.tableFrameOnly);
     map.insert(QStringLiteral("tableColumns"), candidate.tableColumns);
     map.insert(QStringLiteral("tableCellTexts"), draft.tableCellTexts);
     QVariantList tableFormats;

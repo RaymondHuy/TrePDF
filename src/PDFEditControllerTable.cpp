@@ -103,7 +103,7 @@ QString PDFEditController::setSelectedTableCellContent(int row, int column, cons
                                                        const QVariantMap &formatMap)
 {
     if (m_saving || m_frameResizeActive || m_textEditActive || !m_document || !m_hasSelection
-        || !m_selectedCandidate.editable || !documentAllowsEditing()
+        || !m_selectedCandidate.editable || m_selectedCandidate.tableFrameOnly || !documentAllowsEditing()
         || !isShapeCandidateKind(m_selectedCandidate.kind) || m_selectedCandidate.shapeType != TableShape) {
         //% "Select an editable table before editing a cell."
         return qtTrId("TableCellNotEditable");

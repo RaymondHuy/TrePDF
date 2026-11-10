@@ -214,6 +214,16 @@ Rectangle {
 
                         Label {
                             Layout.fillWidth: true
+                            visible: root.editController.selectedTableFrameOnly
+                            //% "Drag the borders to resize the table frame. Text stays in place."
+                            text: qsTrId("TableFrameOnlyHint")
+                            color: root.theme.ribbonTextColor
+                            font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
                             text: root.editShapeSelected
                                 //% "Shape properties"
                                 ? qsTrId("ShapeProperties")

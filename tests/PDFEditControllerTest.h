@@ -556,6 +556,10 @@ private slots:
     void savesShapesRoundTrip();
     void addsTableWithAtomicHistory();
     void editsTableDividersWithAtomicHistory();
+    void editsImportedTableFrames_data();
+    void editsImportedTableFrames();
+    void rejectsUnsafeImportedTableFrames_data();
+    void rejectsUnsafeImportedTableFrames();
     void editsTableCellsWithAtomicHistory();
     void editsTableCellFormatsWithAtomicHistory();
     void rejectsInvalidTableCellFormats();

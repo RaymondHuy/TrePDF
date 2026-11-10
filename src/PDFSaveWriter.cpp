@@ -2,6 +2,7 @@
 #include "PDFAtomicSaveFile.h"
 #include "PDFShapeUtils.h"
 #include "PDFTableCellMetadata.h"
+#include "PDFTableFrameRecognition.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFSourceTextGeometry.h"
 #include "PDFHeaderMetadata.h"
@@ -220,6 +221,8 @@ struct SaveDraft {
     QString tableId;
     int tableCellIndex = -1;
     QVector<QVector<int>> tableCellObjectPaths;
+    bool tableFrameOnly = false;
+    QVector<QVector<int>> sourceTableFrameObjectPaths;
     QByteArray tableCellFingerprint;
     QPointF shapeStartRatio;
     QPointF shapeEndRatio = QPointF(1.0, 1.0);
@@ -3118,13 +3121,58 @@ bool replaceUnsupportedPaints(FPDF_PAGE page, RasterizedPaints &paints)
     return true;
 }
 
+// Source objects remain immutable throughout each validation/preparation phase.
+// Rebuild this bounded index after the paint-preservation pass replaces objects.
+struct TableFrameSourceIndex {
+    bool initialized = false;
+    QVector<PDFTableFrameRecognition::Group> groups;
+};
+
 QVector<SourceObject> sourceObjectsForDraft(FPDF_PAGE page,
                                              const SaveDraft &draft,
                                              PDFSaveWriter::Result &result,
                                              PDFTableCellMetadata::PageIndex &tableIndex,
+                                             TableFrameSourceIndex &frameIndex,
                                              FPDF_TEXTPAGE &tableTextPage)
 {
     QVector<SourceObject> objects;
+    if (!draft.sourceTableFrameObjectPaths.isEmpty()) {
+        if (draft.kind != SaveDraft::Kind::Shape || draft.added || !draft.tableFrameOnly
+            || draft.shapeType != PDFEditController::TableShape
+            || draft.sourceShapeMetadata.isEmpty() || !draft.tableCellObjectPaths.isEmpty()
+            || draft.sourceObjectPaths.size() != 1
+            || draft.sourceObjectPaths.first() != draft.sourceTableFrameObjectPaths.first()) {
+            result = failure(PDFSaveWriter::Error::UnsupportedSourceObject,
+                             draft.page, draft.objectId);
+            return {};
+        }
+        if (!frameIndex.initialized) {
+            frameIndex.groups = PDFTableFrameRecognition::scan(page,
+                QSizeF(FPDF_GetPageWidthF(page), FPDF_GetPageHeightF(page)));
+            frameIndex.initialized = true;
+        }
+        const auto group = std::find_if(frameIndex.groups.cbegin(), frameIndex.groups.cend(),
+            [&draft](const auto &candidate) {
+                return candidate.objectPaths == draft.sourceTableFrameObjectPaths
+                    && candidate.fingerprint == draft.sourceShapeMetadata;
+            });
+        if (group == frameIndex.groups.cend()) {
+            result = failure(PDFSaveWriter::Error::SourceObjectMissing,
+                             draft.page, draft.objectId);
+            return {};
+        }
+        for (const auto &path : group->objectPaths) {
+            const auto source = sourceObjectAtPath(page, path);
+            if (path.size() != 1 || !source.object
+                || FPDFPageObj_GetType(source.object) != FPDF_PAGEOBJ_PATH) {
+                result = failure(PDFSaveWriter::Error::SourceObjectMissing,
+                                 draft.page, draft.objectId);
+                return {};
+            }
+            objects.append(source);
+        }
+        return objects;
+    }
     QSet<FPDF_PAGEOBJECT> seen;
     for (const QVector<int> &path : draft.sourceObjectPaths) {
         if (path.size() != 1) {
@@ -3489,6 +3537,7 @@ PDFSaveWriter::Result createShapeDraftObject(
     metadata.type = draft.shapeType;
     metadata.tableRows = draft.tableRows;
     metadata.tableColumns = draft.tableColumns;
+    metadata.tableFrameOnly = draft.tableFrameOnly;
     metadata.tableRowStops = draft.tableRowStops;
     metadata.tableColumnStops = draft.tableColumnStops;
     metadata.tableCellTexts = draft.tableCellTexts;
@@ -5813,6 +5862,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         pageHeight);
     RasterizedPaints rasterizedPaints;
     PDFTableCellMetadata::PageIndex sourceTableIndex;
+    TableFrameSourceIndex sourceFrameIndex;
     FPDF_TEXTPAGE tableTextPage = nullptr;
     const auto closeTableTextPage = qScopeGuard([&] {
         if (tableTextPage)
@@ -5828,12 +5878,13 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         }
         PDFSaveWriter::Result sourceResult;
         const QVector<SourceObject> sources = sourceObjectsForDraft(
-            page.get(), draft, sourceResult, sourceTableIndex, tableTextPage);
+            page.get(), draft, sourceResult, sourceTableIndex, sourceFrameIndex, tableTextPage);
         if (!sourceResult.succeeded()) {
             return sourceResult;
         }
         if (draft.kind == SaveDraft::Kind::Shape
-            && sources.size() != 1 + draft.tableCellObjectPaths.size()) {
+            && sources.size() != (draft.sourceTableFrameObjectPaths.isEmpty()
+                ? 1 + draft.tableCellObjectPaths.size() : draft.sourceTableFrameObjectPaths.size())) {
             return failure(PDFSaveWriter::Error::SourceObjectMissing,
                            pageIndex, draft.objectId);
         }
@@ -5843,6 +5894,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
         tableTextPage = nullptr;
     }
     sourceTableIndex = {};
+    sourceFrameIndex = {};
     const bool hasPageObjectDrafts = std::any_of(
         drafts.cbegin(),
         drafts.cend(),
@@ -5932,6 +5984,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     // Paint preservation may replace source objects. Index again after that
     // phase, and share this snapshot until all replacements are prepared.
     PDFTableCellMetadata::PageIndex preparedTableIndex;
+    TableFrameSourceIndex preparedFrameIndex;
     for (const SaveDraft &draft : drafts) {
         if (draft.kind == SaveDraft::Kind::TextMarkup
             || draft.kind == SaveDraft::Kind::StickyNote
@@ -5949,6 +6002,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
             draft,
             sourceResult,
             preparedTableIndex,
+            preparedFrameIndex,
             tableTextPage);
         if (!sourceResult.succeeded()) {
             destroyPreparedObjects(preparedDrafts);
@@ -7634,6 +7688,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
         saveDraft.tableFontSize = draft->tableFontSize;
         saveDraft.tableId = draft->tableId;
         saveDraft.tableCellObjectPaths = draft->candidate.tableCellObjectPaths;
+        saveDraft.tableFrameOnly = draft->candidate.tableFrameOnly;
+        saveDraft.sourceTableFrameObjectPaths = draft->candidate.sourceTableFrameObjectPaths;
         saveDraft.tableCellFingerprint = draft->candidate.tableCellFingerprint;
         saveDraft.shapeStartRatio = draft->candidate.shapeStartRatio;
         saveDraft.shapeEndRatio = draft->candidate.shapeEndRatio;

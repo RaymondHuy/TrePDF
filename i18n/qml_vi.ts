@@ -1164,6 +1164,10 @@ Nhấn Lưu để giữ thay đổi. Chuyển sang tab Xem để thử liên k�
         <source>Collapse shape properties</source>
         <translation>Thu gọn thuộc tính hình vẽ</translation>
     </message>
+    <message id="TableFrameOnlyHint">
+        <source>Drag the borders to resize the table frame. Text stays in place.</source>
+        <translation>Kéo đường viền để thay đổi kích thước khung bảng. Chữ giữ nguyên vị trí.</translation>
+    </message>
     <message id="ShapePropertiesReadOnly">
         <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="281"/>
         <source>This shape&apos;s appearance is read-only.</source>

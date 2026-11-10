@@ -1,6 +1,7 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
 #include "PDFTableCellMetadata.h"
+#include "PDFTableFrameRecognition.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1199,6 +1200,114 @@ bool createTableTestPage(const QString &path, int rotation)
         page, QByteArrayLiteral("<< /Length 0 >>\nstream\n\nendstream")});
 }
 
+bool createImportedTableFrame(const QString &path, bool filled, int rotation,
+                              const QString &change = {})
+{
+    QByteArray content = QByteArrayLiteral(
+        "BT /F1 12 Tf 65 550 Td (Independent text) Tj ET\n"
+        "BT /F1 12 Tf 365 550 Td (123.45) Tj ET\n0 g 0 G 1 w\n");
+    if (change == QLatin1String("marked"))
+        content += "/TrePDFShape BMC\n";
+    if (change == QLatin1String("dashed"))
+        content += "[3 2] 0 d\n";
+    if (change == QLatin1String("clipped"))
+        content += "q 50 100 250 500 re W n\n";
+    const auto rectangle = [&](int x, int y, int width, int height) {
+        content += QByteArray::number(x) + ' ' + QByteArray::number(y) + ' '
+            + QByteArray::number(width) + ' ' + QByteArray::number(height) + " re f\n";
+    };
+    const auto line = [&](int x1, int y1, int x2, int y2) {
+        content += QByteArray::number(x1) + ' ' + QByteArray::number(y1) + " m "
+            + QByteArray::number(x2) + ' ' + QByteArray::number(y2) + " l S\n";
+    };
+    if (filled) {
+        // Office-style borders: split strips, junction squares and duplicate
+        // corners, as opposed to a single already-semantic table path.
+        for (int x = 50; x <= 550; x += 100) {
+            rectangle(x, 595, 1, x == 50 || x == 550 ? 6 : 5);
+            rectangle(x, 600, 1, 1);
+            if (x < 550)
+                rectangle(x + 1, 600, 99, 1);
+        }
+        for (int x = 50; x <= 550; x += 100) {
+            rectangle(x, 101, 1, 494);
+            rectangle(x, 100, 1, 1);
+            if (x == 50 || x == 550)
+                rectangle(x, 100, 1, 1);
+            if (x < 550)
+                rectangle(x + 1, 100, 99, 1);
+        }
+    } else {
+        line(50, 100, 550, 100);
+        line(50, 600, 550, 600);
+        line(50, 100, 50, 600);
+        if (change != QLatin1String("missing-border"))
+            line(550, 100, 550, 600);
+        if (change != QLatin1String("one-cell")) {
+            if (change == QLatin1String("mixed-color"))
+                content += "1 0 0 RG\n";
+            line(200, change == QLatin1String("partial-divider") ? 350 : 100, 200, 600);
+            content += "0 G\n";
+            if (change == QLatin1String("interleaved-text"))
+                content += "BT /F1 12 Tf 365 300 Td (Between paths) Tj ET\n";
+            line(350, 100, 350, 600);
+            line(50, 350, 550, 350);
+        }
+    }
+    if (change == QLatin1String("marked"))
+        content += "EMC\n";
+    if (change == QLatin1String("clipped"))
+        content += "Q\n";
+    const QByteArray page = QByteArrayLiteral(
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 700] "
+        "/CropBox [20 30 580 670] /Resources << /Font << /F1 5 0 R >> >> "
+        "/Contents 4 0 R /Rotate ") + QByteArray::number(rotation * 90) + " >>";
+    return writePdfObjects(path, {
+        QByteArrayLiteral("<< /Type /Catalog /Pages 2 0 R >>"),
+        QByteArrayLiteral("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"), page,
+        "<< /Length " + QByteArray::number(content.size()) + " >>\nstream\n"
+            + content + "endstream",
+        QByteArrayLiteral("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")});
+}
+
+QJsonArray importedFrameTextSnapshot(const QString &path)
+{
+    PDFiumProcessLock lock;
+    const QByteArray filename = QFile::encodeName(path);
+    const auto document = FPDF_LoadDocument(filename.constData(), nullptr);
+    if (!document)
+        return {};
+    const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(document); });
+    const auto page = FPDF_LoadPage(document, 0);
+    if (!page)
+        return {};
+    const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+    const auto textPage = FPDFText_LoadPage(page);
+    if (!textPage)
+        return {};
+    const auto closeTextPage = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
+    QJsonArray result;
+    for (int i = 0; i < FPDFPage_CountObjects(page); ++i) {
+        const auto object = FPDFPage_GetObject(page, i);
+        if (FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT)
+            continue;
+        const auto bytes = FPDFTextObj_GetText(object, textPage, nullptr, 0);
+        if (bytes < 2 || bytes > 1024)
+            return {};
+        QVector<FPDF_WCHAR> text(bytes / 2);
+        FS_MATRIX matrix{};
+        float left = 0, bottom = 0, right = 0, top = 0;
+        if (FPDFTextObj_GetText(object, textPage, text.data(), bytes) != bytes
+            || !FPDFPageObj_GetMatrix(object, &matrix)
+            || !FPDFPageObj_GetBounds(object, &left, &bottom, &right, &top))
+            return {};
+        result.append(QJsonArray{
+            QString::fromUtf16(reinterpret_cast<const char16_t *>(text.constData()), text.size() - 1),
+            matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f, left, bottom, right, top});
+    }
+    return result;
+}
+
 bool tamperTableCellObject(const QString &sourcePath, const QString &targetPath,
                            const QString &change)
 {
@@ -1303,6 +1412,155 @@ bool tamperTableCellObject(const QString &sourcePath, const QString &targetPath,
     PdfFileWriter writer(targetPath);
     return writer.open() && FPDF_SaveAsCopy(document, &writer, FPDF_NO_INCREMENTAL);
 }
+}
+
+void PDFEditControllerTest::editsImportedTableFrames_data()
+{
+    QTest::addColumn<bool>("filled");
+    QTest::addColumn<int>("rotation");
+    QTest::newRow("filled-five-columns") << true << 0;
+    QTest::newRow("stroked") << false << 0;
+    QTest::newRow("stroked-90") << false << 1;
+    QTest::newRow("stroked-180") << false << 2;
+    QTest::newRow("stroked-270") << false << 3;
+}
+
+void PDFEditControllerTest::editsImportedTableFrames()
+{
+    QFETCH(bool, filled);
+    QFETCH(int, rotation);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("imported-frame-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("imported-frame-saved-%1.pdf").arg(suffix));
+    QVERIFY(createImportedTableFrame(path, filled, rotation));
+    {
+        PDFiumProcessLock lock;
+        const QByteArray filename = QFile::encodeName(path);
+        const auto pdf = FPDF_LoadDocument(filename.constData(), nullptr);
+        QVERIFY(pdf);
+        const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(pdf); });
+        const auto page = FPDF_LoadPage(pdf, 0);
+        QVERIFY(page);
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        auto cancelled = std::make_shared<std::atomic_bool>(true);
+        QVERIFY(PDFTableFrameRecognition::scan(page,
+            QSizeF(FPDF_GetPageWidthF(page), FPDF_GetPageHeightF(page)), cancelled).isEmpty());
+    }
+    const auto originalText = importedFrameTextSnapshot(path);
+    QCOMPARE(originalText.size(), 2);
+    const QString originalPageText = pageText(path);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const auto candidates = waitForCandidates(controller, 0);
+    const auto table = candidateForKind(candidates, QStringLiteral("sourceShape"));
+    QVERIFY(!table.isEmpty());
+    QCOMPARE(table.value(QStringLiteral("shapeType")).toInt(), int(PDFEditController::TableShape));
+    QVERIFY(table.value(QStringLiteral("tableFrameOnly")).toBool());
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), filled ? 1 : rotation % 2 ? 3 : 2);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), filled ? 5 : rotation % 2 ? 2 : 3);
+    int shapeCount = 0;
+    for (const auto &candidate : candidates)
+        shapeCount += candidate.toMap().value(QStringLiteral("kind")).toString() == QLatin1String("sourceShape");
+    QCOMPARE(shapeCount, 1); // Member paths are not independently editable shapes.
+    QVERIFY(!candidateForKind(candidates, QStringLiteral("text")).isEmpty());
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    const QRectF frame = controller.selectedFrameRect();
+    QCOMPARE(controller.candidateAt(0, frame.left(), frame.center().y())
+        .value(QStringLiteral("objectId")).toString(), table.value(QStringLiteral("objectId")).toString());
+    QVERIFY(controller.candidateAt(0, frame.left() + frame.width() * .07,
+        frame.top() + frame.height() * .55).isEmpty());
+    const auto textCandidate = candidateForKind(candidates, QStringLiteral("text"));
+    const auto textCenter = textCandidate.value(QStringLiteral("sourceRect")).toRectF().center();
+    QCOMPARE(controller.candidateAt(0, textCenter.x(), textCenter.y())
+        .value(QStringLiteral("kind")).toString(), QStringLiteral("text"));
+    const auto originalColumns = controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList();
+    QVERIFY(!controller.setSelectedTableCellText(0, 0, QStringLiteral("Must stay independent")).isEmpty());
+    QVERIFY(!controller.hasDrafts());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 0, .12);
+    controller.updateSelectedTableDivider(true, 0, .15);
+    controller.finishSelectedFrameResize();
+    QCOMPARE(controller.selectedFrameRect(), frame);
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList().at(0).toDouble(), .15);
+    const auto suppressed = controller.draftedTextObjectPathsForPage(0);
+    QCOMPARE(suppressed.size(), filled ? 36 : 7);
+    for (const auto &objectPath : suppressed) {
+        QCOMPARE(objectPath.size(), 1);
+        QVERIFY(objectPath.first() >= 2); // Source text must not be suppressed.
+    }
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList(), originalColumns);
+    controller.redo();
+    const auto columns = controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList();
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(true, 0, .2);
+    controller.cancelSelectedFrameResize();
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumnStops")).toList(), columns);
+    if (!filled) {
+        controller.beginSelectedFrameResize();
+        controller.updateSelectedTableDivider(false, 0, .2);
+        controller.finishSelectedFrameResize();
+    }
+    const auto rows = controller.selectedDraftPreview().value(QStringLiteral("tableRowStops")).toList();
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(importedFrameTextSnapshot(saved), originalText);
+    QCOMPARE(pageText(saved), originalPageText);
+    QCOMPARE(inspectShapePaths(saved).count, 1); // One managed frame replaces all source rules.
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    const auto again = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(!again.isEmpty());
+    QVERIFY(again.value(QStringLiteral("tableFrameOnly")).toBool());
+    QCOMPARE(again.value(QStringLiteral("tableColumnStops")).toList(), columns);
+    QCOMPARE(again.value(QStringLiteral("tableRowStops")).toList(), rows);
+    QVERIFY(reopened.selectCandidate(0, again.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!reopened.setSelectedTableCellText(0, 0, QStringLiteral("Still independent")).isEmpty());
+    reopened.beginSelectedFrameResize();
+    reopened.updateSelectedFrameRect(frame.adjusted(.01, .01, -.01, -.01));
+    reopened.finishSelectedFrameResize();
+    QVERIFY(reopened.save());
+    QCOMPARE(importedFrameTextSnapshot(saved), originalText);
+    const auto resized = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(reopened.selectCandidate(0, resized.value(QStringLiteral("objectId")).toString()));
+    reopened.deleteSelectedObject();
+    reopened.undo();
+    QVERIFY(!reopened.hasDrafts());
+    reopened.redo();
+    QVERIFY(reopened.save());
+    QCOMPARE(inspectShapePaths(saved).count, 0);
+    QCOMPARE(importedFrameTextSnapshot(saved), originalText);
+    QCOMPARE(pageText(saved), originalPageText);
+}
+
+void PDFEditControllerTest::rejectsUnsafeImportedTableFrames_data()
+{
+    QTest::addColumn<QString>("change");
+    for (const auto *change : {"missing-border", "partial-divider", "marked", "dashed",
+                               "clipped", "mixed-color", "interleaved-text", "one-cell"})
+        QTest::newRow(change) << QString::fromLatin1(change);
+}
+
+void PDFEditControllerTest::rejectsUnsafeImportedTableFrames()
+{
+    QFETCH(QString, change);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("unsafe-frame-%1.pdf").arg(change));
+    QVERIFY(createImportedTableFrame(path, false, 0, change));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    const auto candidates = waitForCandidates(controller, 0);
+    for (const auto &candidate : candidates) {
+        const auto map = candidate.toMap();
+        QVERIFY(map.value(QStringLiteral("kind")).toString() != QLatin1String("sourceShape")
+            || map.value(QStringLiteral("shapeType")).toInt() != PDFEditController::TableShape);
+    }
+    QVERIFY(!controller.hasDrafts());
 }
 
 void PDFEditControllerTest::addsTableWithAtomicHistory()
