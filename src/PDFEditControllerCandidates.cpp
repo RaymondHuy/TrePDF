@@ -8,6 +8,7 @@
 #include "PDFSaveWriter.h"
 #include "PDFShapeUtils.h"
 #include "PDFTableCellMetadata.h"
+#include "PDFTableFrameRecognition.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFSourceTextGeometry.h"
 #include "PDFSymbolFont.h"
@@ -2300,10 +2301,55 @@ QVector<PDFEditController::Candidate> PDFEditController::scanPageLocked(
     QHash<FPDF_FONT, FontResolutionSnapshot> fontResolutionCache;
     qsizetype embeddedFontDataBytes = 0;
     PDFTableCellMetadata::PageIndex tableCellIndex;
+    const auto tableFrames = PDFTableFrameRecognition::scan(page, request.pageSize, cancellation);
+    QHash<int, qsizetype> tableFrameByFirstObject;
+    QSet<int> tableFrameMembers;
+    for (qsizetype group = 0; group < tableFrames.size(); ++group) {
+        const auto &paths = tableFrames[group].objectPaths;
+        if (paths.isEmpty())
+            continue;
+        tableFrameByFirstObject.insert(paths.first().first(), group);
+        for (const auto &path : paths)
+            tableFrameMembers.insert(path.first());
+    }
     const int objectCount = FPDFPage_CountObjects(page);
     for (int index = 0;
          index < objectCount && !candidateScanCancelled(cancellation);
          ++index) {
+        const auto frame = tableFrameByFirstObject.constFind(index);
+        if (frame != tableFrameByFirstObject.cend()) {
+            const auto &group = tableFrames[*frame];
+            const auto &metadata = group.metadata;
+            Candidate candidate;
+            candidate.objectPath = group.objectPaths.first();
+            candidate.objectId = pageObjectId(candidate.objectPath);
+            candidate.kind = QStringLiteral("sourceShape");
+            candidate.label = qtTrId("Shapes");
+            setInitialGeometry(candidate, metadata.frame);
+            candidate.shapeType = metadata.type;
+            candidate.tableRows = metadata.tableRows;
+            candidate.tableColumns = metadata.tableColumns;
+            candidate.tableRowStops = metadata.tableRowStops;
+            candidate.tableColumnStops = metadata.tableColumnStops;
+            candidate.tableFrameOnly = true;
+            candidate.sourceTableFrameObjectPaths = group.objectPaths;
+            candidate.shapeStartRatio = metadata.start;
+            candidate.shapeEndRatio = metadata.end;
+            candidate.shapeStrokeWidthRatio = metadata.strokeWidthRatio;
+            candidate.fillColor = Qt::transparent;
+            candidate.strokeColor = metadata.stroke;
+            candidate.commentProperties.strokeColor = metadata.stroke;
+            candidate.commentProperties.interiorColor = metadata.fill;
+            candidate.commentProperties.opacity = metadata.opacity;
+            candidate.sourceShapeMetadata = group.fingerprint;
+            candidate.editable = request.editingAllowed;
+            candidate.renderSuppressible = true;
+            if (!request.editingAllowed)
+                candidate.reason = qtTrId("PdfEditingNotPermitted");
+            candidates.append(std::move(candidate));
+        }
+        if (tableFrameMembers.contains(index))
+            continue;
         appendPageObjectCandidates(
             page,
             FPDFPage_GetObject(page, index),
@@ -2505,6 +2551,7 @@ void PDFEditController::appendPageObjectCandidates(
         candidate.shapeType = metadata.type;
         candidate.tableRows = metadata.tableRows;
         candidate.tableColumns = metadata.tableColumns;
+        candidate.tableFrameOnly = metadata.tableFrameOnly;
         candidate.tableRowStops = metadata.tableRowStops;
         candidate.tableColumnStops = metadata.tableColumnStops;
         candidate.tableCellTexts = metadata.tableCellTexts;

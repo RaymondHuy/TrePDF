@@ -1119,6 +1119,7 @@ Item {
 
     function beginTableCellEditing(x, y) {
         if (!tableCellState || !interactionActive || !resizeOverlay.selectedTable
+                || resizeOverlay.selectedDraft.tableFrameOnly
                 || controller.selectedPage !== page || !controller.selectedEditable)
             return
 
@@ -1236,6 +1237,30 @@ Item {
         const endRatio = candidate.shapeEnd !== undefined
             ? candidate.shapeEnd
             : Qt.point(1, 1)
+
+        // Imported frames leave cell interiors available to independent text.
+        if (candidate.tableFrameOnly) {
+            if (point.x < left - tolerance || point.x > right + tolerance
+                    || point.y < top - tolerance || point.y > bottom + tolerance)
+                return false
+            const rows = Number(candidate.tableRows || 1)
+            const columns = Number(candidate.tableColumns || 1)
+            const rowStops = candidate.tableRowStops || []
+            const columnStops = candidate.tableColumnStops || []
+            for (let row = 0; row <= rows; ++row) {
+                const ratio = row === 0 ? 0 : row === rows ? 1
+                    : rowStops.length === rows - 1 ? Number(rowStops[row - 1]) : row / rows
+                if (Math.abs(point.y - top - ratio * (bottom - top)) <= tolerance)
+                    return true
+            }
+            for (let column = 0; column <= columns; ++column) {
+                const ratio = column === 0 ? 0 : column === columns ? 1
+                    : columnStops.length === columns - 1 ? Number(columnStops[column - 1]) : column / columns
+                if (Math.abs(point.x - left - ratio * (right - left)) <= tolerance)
+                    return true
+            }
+            return false
+        }
 
         // Match controller hover/selection: closed interiors also accept
         // dragging when the shape has no fill or is fully transparent.

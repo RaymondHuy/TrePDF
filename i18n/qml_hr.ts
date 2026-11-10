@@ -1071,6 +1071,10 @@ Spremite promjene, a zatim prijeđite na karticu Prikaz da biste isprobali povez
         <source>Collapse shape properties</source>
         <translation>Sažmi svojstva oblika</translation>
     </message>
+    <message id="TableFrameOnlyHint">
+        <source>Drag the borders to resize the table frame. Text stays in place.</source>
+        <translation>Povucite obrube za promjenu veličine okvira tablice. Tekst ostaje na mjestu.</translation>
+    </message>
     <message id="ShapePropertiesReadOnly">
         <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="281"/>
         <source>This shape&apos;s appearance is read-only.</source>

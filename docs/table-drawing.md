@@ -12,8 +12,28 @@ khác giữ nguyên. Các đường phân cách không thể vượt qua nhau. E
 đang kéo khôi phục vị trí trước thao tác; mỗi lần kéo hoàn tất là một bước Undo.
 Màu nét và độ trong suốt dùng panel thuộc tính Shape.
 Undo/Redo hoạt động như các Shape khác. Bảng không có màu tô;
-chưa hỗ trợ gộp ô hoặc nhận diện bảng có sẵn.
+chưa hỗ trợ gộp ô.
 Số hàng/cột chọn trong popup chỉ áp dụng cho bảng mới.
+
+## Khung bảng có sẵn trong PDF
+
+TrePDF tự nhận diện khung lưới kín từ các nét thẳng hoặc dải chữ nhật mảnh
+cùng màu, cùng độ dày. Bấm vào đường kẻ để chọn khung, kéo đường phân cách
+để đổi độ rộng cột/chiều cao hàng; các tay nắm ngoài thay đổi kích thước khung.
+Khung chỉ có một hàng dùng tay nắm trên/dưới để đổi chiều cao. Mỗi thao tác
+hỗ trợ Undo/Redo, hủy kéo và Save/Save As.
+
+Chỉ đường kẻ được gom nhóm. Chữ và ảnh giữ nguyên vị trí, tiếp tục chọn và
+chỉnh sửa riêng; chúng không dồn dòng hoặc di chuyển theo khung. Xóa khung
+giữ lại chữ và ảnh. Panel thuộc tính nhắc rõ hành vi này. Khung nhận diện
+không mở trình nhập nội dung ô; bảng tạo bằng công cụ Table vẫn sửa ô như cũ.
+
+Phạm vi nhận diện gồm lưới tối đa 20×20, ít nhất một đường phân cách, nét đặc
+đục từ 0,75 đến 2,5 pt và toàn bộ đường phân cách nối kín hai mép. Các nét
+phải ở cấp trang, không có marker/clip và nằm liên tiếp trong thứ tự vẽ.
+Hỗ trợ dải đường kẻ bị chia thành nhiều đoạn, các miếng nối góc trùng nhau,
+CropBox và góc xoay trang. Bảng scan, nét đứt, đường cong, ô gộp, viền thiếu,
+độ dày/màu khác nhau và đường kẻ trong Form XObject chưa được gom nhóm.
 
 ## Sửa nội dung ô
 
@@ -81,6 +101,14 @@ chung pipeline nhúng font với Add Text. Nét underline dùng child marker
 của bảng, được kiểm tra geometry và liên kết với fragment chữ tương ứng;
 di chuyển, xóa và suppression xử lý cả chữ lẫn các nét này.
 
+`PDFTableFrameRecognition.h` quét riêng khung nguồn với giới hạn 50.000
+đối tượng, 16.384 segment, 2.048 thành phần nét và 64 khung mỗi trang; có
+kiểm tra hủy. Fingerprint gồm geometry, paint, thứ tự đối tượng và phép ánh
+xạ trang; writer đối chiếu lại trước khi thay cả nhóm nét bằng một path.
+Save đầu tiên sau khi chỉnh khung ghi metadata version 7 với `frameOnly`,
+lưu đường phân cách và tiếp tục giữ chữ nguồn độc lập. Mở file hoặc chỉ chọn
+khung không ghi metadata và không tạo draft.
+
 Khi mở lại hoặc lưu sửa đổi, scanner/writer kiểm tra số hàng/cột là số nguyên
 trong giới hạn, kiểm các mảng tỉ lệ đúng số lượng, hữu hạn, tăng dần và cách
 nhau ít nhất 0,0001 (kể cả hai mép). Thao tác kéo thông thường giữ khoảng cách
@@ -88,13 +116,17 @@ nhau ít nhất 0,0001 (kể cả hai mép). Thao tác kéo thông thường gi�
 Scanner kiểm cấu trúc marker, geometry, màu/opacity và so sánh path
 thực tế với path chuẩn được dựng lại. Metadata tối đa 128 KiB, bảng 20×20 tối
 đa 82 segment; shape thường giữ giới hạn riêng 32 segment. Marker hỏng không
-được thử nhận diện như shape không marker. Những đường kẻ của bảng bên ngoài
-TrePDF không tự gộp thành đối tượng Table.
+được thử nhận diện như shape không marker. Khung nguồn không có marker đi
+qua bộ nhận diện khung riêng với các điều kiện ở trên.
 
 Scanner chỉ khôi phục bảng có chữ khi nhóm text con đầy đủ và hợp lệ; các
 text con được loại khỏi danh sách Edit text độc lập. Writer kiểm tra lại nhóm
 và fingerprint nguồn trước khi thay hoặc xóa để không để sót chữ cũ. Giới hạn
 văn bản và metadata được kiểm tra cả khi đọc PDF, không chỉ lúc nhập.
+Nếu PDFium thêm khoảng trắng phân cách giữa các text object khi trích xuất,
+reader đối chiếu lại ký tự thực thuộc từng object, bỏ qua ký tự do PDFium tự
+sinh. Khoảng trắng thực trong ô vẫn được giữ và kiểm tra; bước đối chiếu dự
+phòng dùng index chung với giới hạn 50.000 ký tự mỗi trang.
 Nhóm phải liên tiếp theo thứ tự khung rồi chữ; có đối tượng khác xen vào sẽ
 không được chỉnh như bảng để tránh đổi thứ tự lớp vẽ. Index dùng chung trên
 mỗi trang tránh quét lại toàn trang cho từng bảng, có kiểm tra hủy và giới hạn

@@ -45,7 +45,7 @@ QtObject {
         const nextColumns = Number(draft.tableColumns || 0)
         const index = targetRow * nextColumns + targetColumn
         const rects = draft.tableCellRects || []
-        if (draft.shapeType !== PDFEditController.TableShape
+        if (draft.shapeType !== PDFEditController.TableShape || draft.tableFrameOnly
                 || targetRow < 0 || targetRow >= nextRows
                 || targetColumn < 0 || targetColumn >= nextColumns
                 || index >= rects.length)

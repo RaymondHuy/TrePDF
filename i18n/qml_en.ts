@@ -1164,6 +1164,10 @@ Save your changes, then switch to the View tab to try the link.</translation>
         <source>Collapse shape properties</source>
         <translation>Collapse shape properties</translation>
     </message>
+    <message id="TableFrameOnlyHint">
+        <source>Drag the borders to resize the table frame. Text stays in place.</source>
+        <translation>Drag the borders to resize the table frame. Text stays in place.</translation>
+    </message>
     <message id="ShapePropertiesReadOnly">
         <location filename="../src/Components/DrawingCommentPropertiesPanel.qml" line="281"/>
         <source>This shape&apos;s appearance is read-only.</source>
