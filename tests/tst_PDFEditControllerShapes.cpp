@@ -1,5 +1,6 @@
 #include "PDFEditControllerTest.h"
 #include "PDFEditControllerTestSupport.h"
+#include "PDFTableCellMetadata.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1846,6 +1847,92 @@ void PDFEditControllerTest::savesFormattedTableCellsRoundTrip()
     QVERIFY(reopened.save());
     QCOMPARE(topLevelPageObjectCount(saved), 0);
     QVERIFY(pageText(saved).trimmed().isEmpty());
+}
+
+void PDFEditControllerTest::reopensTableCellsWithGeneratedSpacing_data()
+{
+    QTest::addColumn<QString>("firstCellText");
+    QTest::newRow("short") << QStringLiteral("Alpha");
+    QTest::newRow("maximum-length")
+        << QString(PDFTableCellLayout::MaximumCellCharacters, QLatin1Char('i'));
+}
+
+void PDFEditControllerTest::reopensTableCellsWithGeneratedSpacing()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(QString, firstCellText);
+    const bool maximumLength = firstCellText.size() == PDFTableCellLayout::MaximumCellCharacters;
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("table-neighbor-source.pdf"));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("table-neighbor-saved.pdf"));
+    const QString legacy = m_temporaryDirectory.filePath(QStringLiteral("table-neighbor-legacy.pdf"));
+    if (maximumLength) {
+        // Keep all 1,024 characters in one 12-point physical run, including
+        // when the fixture is downgraded to v5's fixed 12-point format.
+        QVERIFY(writePdfObjects(path, {
+            QByteArrayLiteral("<< /Type /Catalog /Pages 2 0 R >>"),
+            QByteArrayLiteral("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+            QByteArrayLiteral("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 12000 800] "
+                              "/Resources << >> /Contents 4 0 R >>"),
+            QByteArrayLiteral("<< /Length 0 >>\nstream\n\nendstream")}));
+    } else {
+        QVERIFY(createTableTestPage(path, 0));
+    }
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(3);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.9, .4)).isEmpty());
+    const QStringList contents{firstCellText, QStringLiteral("Bravo "), QStringLiteral("Charlie")};
+    for (int column = 0; column < contents.size(); ++column)
+        QVERIFY(controller.setSelectedTableCellContent(0, column, contents[column],
+            toVariant(plain(contents[column], {testFontFamily()}))).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    {
+        PDFiumProcessLock lock;
+        const QByteArray filename = QFile::encodeName(saved);
+        FPDF_DOCUMENT pdf = FPDF_LoadDocument(filename.constData(), nullptr);
+        QVERIFY(pdf);
+        const auto closeDocument = qScopeGuard([&] { FPDF_CloseDocument(pdf); });
+        FPDF_PAGE page = FPDF_LoadPage(pdf, 0);
+        QVERIFY(page);
+        const auto closePage = qScopeGuard([&] { FPDF_ClosePage(page); });
+        FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+        QVERIFY(textPage);
+        const auto closeTextPage = qScopeGuard([&] { FPDFText_ClosePage(textPage); });
+        const auto first = FPDFPage_GetObject(page, 1);
+        const unsigned long length = FPDFTextObj_GetText(first, textPage, nullptr, 0);
+        QCOMPARE(length, static_cast<unsigned long>(2 * (firstCellText.size() + 2)));
+        if (maximumLength)
+            QVERIFY(length > 2 * (PDFTableCellLayout::MaximumCellCharacters + 1));
+        QVector<FPDF_WCHAR> text(length / 2);
+        QCOMPARE(FPDFTextObj_GetText(first, textPage, text.data(), length), length);
+        QCOMPARE(QString::fromUtf16(reinterpret_cast<const char16_t *>(text.constData()),
+            text.size() - 1), firstCellText + QLatin1Char(' '));
+        PDFTableCellMetadata::PageIndex index;
+        QVERIFY(PDFTableCellMetadata::matchesObjectText(index, textPage, first, contents[0], {}));
+        QVERIFY(!PDFTableCellMetadata::matchesObjectText(index, textPage, first,
+            firstCellText + QLatin1Char(' '), {}));
+    }
+    QVERIFY(writeLegacyTableFormats(saved, legacy));
+    for (const QString &file : {saved, legacy}) {
+        PDFDocument reopenedDocument;
+        PDFEditController reopened;
+        QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(file)));
+        reopened.setDocument(&reopenedDocument);
+        const auto table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+        QVERIFY2(!table.isEmpty(), "Generated inter-cell spacing must not invalidate the managed table.");
+        QCOMPARE(table.value(QStringLiteral("tableCellTexts")).toStringList(), contents);
+        QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+        QVERIFY(reopened.setSelectedTableCellText(0, 0, QStringLiteral("Edited")).isEmpty());
+        QVERIFY(reopened.save());
+        const auto again = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+        QVERIFY(!again.isEmpty());
+        QCOMPARE(again.value(QStringLiteral("tableCellTexts")).toStringList(),
+            QStringList({QStringLiteral("Edited"), contents[1], contents[2]}));
+    }
 }
 
 void PDFEditControllerTest::savesUnderlinedTableSpaces()

@@ -19,6 +19,7 @@ namespace PDFTableCellMetadata {
 inline constexpr char MarkName[] = "TrePDFTableCell";
 inline constexpr int MaximumFragmentBytes = 16 * 1024;
 inline constexpr int MaximumPageObjects = 50000;
+inline constexpr int MaximumPageTextCharacters = 50000;
 inline constexpr qsizetype MaximumPageMetadataBytes = 16 * 1024 * 1024;
 struct FontFingerprints {
     QHash<FPDF_FONT, QByteArray> values;
@@ -235,8 +236,8 @@ struct IndexedChild {
     QJsonObject data;
 };
 
-// One immutable index per page/validation phase. It owns only bounded metadata;
-// current object geometry and Unicode are still checked whenever a group is read.
+// One immutable index per page/validation phase. Metadata and the fallback
+// Unicode snapshot are bounded; object geometry is checked on every group read.
 struct PageIndex {
     FPDF_PAGE page = nullptr;
     QSizeF pageSize;
@@ -244,12 +245,42 @@ struct PageIndex {
     bool valid = false;
     QHash<QString, QVector<int>> parents;
     QHash<QString, QVector<IndexedChild>> children;
+    bool textIndexed = false;
+    bool textIndexValid = false;
+    QHash<FPDF_PAGEOBJECT, QString> objectText;
     FontFingerprints fonts;
 };
 
 inline bool cancelled(const std::shared_ptr<std::atomic_bool> &cancellation)
 {
     return cancellation && cancellation->load(std::memory_order_relaxed);
+}
+
+inline bool matchesObjectText(PageIndex &index, FPDF_TEXTPAGE page,
+                              FPDF_PAGEOBJECT object, const QString &expected,
+                              const std::shared_ptr<std::atomic_bool> &cancellation)
+{
+    if (!index.textIndexed) {
+        index.textIndexed = true;
+        const int count = FPDFText_CountChars(page);
+        if (count < 0 || count > MaximumPageTextCharacters)
+            return false;
+        for (int character = 0; character < count; ++character) {
+            if (cancelled(cancellation))
+                return false;
+            const auto owner = FPDFText_GetTextObject(page, character);
+            if (!owner || FPDFText_IsGenerated(page, character) != 0)
+                continue;
+            const char32_t unicode = FPDFText_GetUnicode(page, character);
+            if (unicode > 0x10ffff || (unicode >= 0xd800 && unicode <= 0xdfff))
+                return false;
+            index.objectText[owner] += QString::fromUcs4(&unicode, 1);
+        }
+        index.textIndexValid = true;
+    }
+    const auto actual = index.objectText.constFind(object);
+    return index.textIndexValid && actual != index.objectText.cend()
+        && extractedText(*actual) == extractedText(expected);
 }
 
 inline bool readBlob(FPDF_PAGEOBJECTMARK mark, qsizetype maximumBytes,
@@ -452,25 +483,32 @@ inline bool readGroup(FPDF_PAGE page, const QSizeF &pageSize,
             if (!signaturesMatch(physical, data.value(QStringLiteral("signature")).toArray()))
                 return false;
             const unsigned long textBytes = FPDFTextObj_GetText(object, textPage, nullptr, 0);
-            if (textBytes < 2 || textBytes > 2 * (PDFTableCellLayout::MaximumCellCharacters + 1)
-                || textBytes % 2)
+            if (textBytes < 2 || textBytes % 2)
                 return false;
-            QVector<FPDF_WCHAR> text(textBytes / 2);
-            if (FPDFTextObj_GetText(object, textPage, text.data(), textBytes) != textBytes)
-                return false;
-            const QString decoded = QString::fromUtf16(
-                reinterpret_cast<const char16_t *>(text.constData()), text.size() - 1);
-            // PDFium can omit all U+0020 glyphs from a rotated text object's
-            // extracted view. Its validated font, matrix, advance and zero-ink
-            // bounds still identify this mandatory child; coverage below must
-            // continue rejecting missing space/underline objects.
-            const bool omittedSpaces = styled && decoded.isEmpty()
-                && std::all_of(encoded.cbegin(), encoded.cend(), [](QChar character) {
-                    return character == QLatin1Char(' ');
-                })
-                && (std::abs(physical[8].toDouble() - physical[6].toDouble()) < .001
-                    || std::abs(physical[9].toDouble() - physical[7].toDouble()) < .001);
-            if (!omittedSpaces && extractedText(decoded) != extractedText(encoded))
+            bool textMatches = false;
+            if (textBytes <= 2 * (PDFTableCellLayout::MaximumCellCharacters + 1)) {
+                QVector<FPDF_WCHAR> text(textBytes / 2);
+                if (FPDFTextObj_GetText(object, textPage, text.data(), textBytes) != textBytes)
+                    return false;
+                const QString decoded = QString::fromUtf16(
+                    reinterpret_cast<const char16_t *>(text.constData()), text.size() - 1);
+                // PDFium can omit all U+0020 glyphs from a rotated text object's
+                // extracted view. Its validated font, matrix, advance and zero-ink
+                // bounds still identify this mandatory child; coverage below must
+                // continue rejecting missing space/underline objects.
+                const bool omittedSpaces = styled && decoded.isEmpty()
+                    && std::all_of(encoded.cbegin(), encoded.cend(), [](QChar character) {
+                        return character == QLatin1Char(' ');
+                    })
+                    && (std::abs(physical[8].toDouble() - physical[6].toDouble()) < .001
+                        || std::abs(physical[9].toDouble() - physical[7].toDouble()) < .001);
+                textMatches = omittedSpaces || extractedText(decoded) == extractedText(encoded);
+            }
+            // GetText can append PDFium-generated spacing between neighboring
+            // objects. Compare only this object's real characters in that case;
+            // do not trim genuine spaces or relax the physical signature checks.
+            // Oversized extraction also uses this bounded fallback without allocating it.
+            if (!textMatches && !matchesObjectText(indexed, textPage, object, encoded, cancellation))
                 return false;
             // Ink may extend fractionally beyond the advance box, within padding.
             for (int x : {6, 8}) {

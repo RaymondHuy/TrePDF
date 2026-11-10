@@ -95,6 +95,10 @@ Scanner chỉ khôi phục bảng có chữ khi nhóm text con đầy đủ và 
 text con được loại khỏi danh sách Edit text độc lập. Writer kiểm tra lại nhóm
 và fingerprint nguồn trước khi thay hoặc xóa để không để sót chữ cũ. Giới hạn
 văn bản và metadata được kiểm tra cả khi đọc PDF, không chỉ lúc nhập.
+Nếu PDFium thêm khoảng trắng phân cách giữa các text object khi trích xuất,
+reader đối chiếu lại ký tự thực thuộc từng object, bỏ qua ký tự do PDFium tự
+sinh. Khoảng trắng thực trong ô vẫn được giữ và kiểm tra; bước đối chiếu dự
+phòng dùng index chung với giới hạn 50.000 ký tự mỗi trang.
 Nhóm phải liên tiếp theo thứ tự khung rồi chữ; có đối tượng khác xen vào sẽ
 không được chỉnh như bảng để tránh đổi thứ tự lớp vẽ. Index dùng chung trên
 mỗi trang tránh quét lại toàn trang cho từng bảng, có kiểm tra hủy và giới hạn
