@@ -1036,7 +1036,7 @@ void PDFEditController::updateSelectedTableDivider(bool column, int index, qreal
     }
 
     Draft draft = selectedDraftForDisplay();
-    const int dimension = column ? draft.candidate.tableColumns : draft.candidate.tableRows;
+    const int dimension = column ? draft.tableColumns : draft.tableRows;
     if (dimension < 2 || dimension > MaximumTableDimension || index < 0 || index >= dimension - 1)
         return;
     QVector<qreal> &stops = column ? draft.tableColumnStops : draft.tableRowStops;
@@ -1063,8 +1063,11 @@ void PDFEditController::updateSelectedTableDivider(bool column, int index, qreal
 
     const QVector<qreal> &sourceStops = column
         ? draft.candidate.tableColumnStops : draft.candidate.tableRowStops;
-    bool matchesSource = true;
-    for (int divider = 0; divider < stops.size(); ++divider) {
+    const int sourceDimension = column
+        ? draft.candidate.tableColumns : draft.candidate.tableRows;
+    bool matchesSource = dimension == sourceDimension
+        && (sourceStops.isEmpty() || sourceStops.size() == stops.size());
+    for (int divider = 0; matchesSource && divider < stops.size(); ++divider) {
         const qreal source = sourceStops.isEmpty()
             ? qreal(divider + 1) / dimension : sourceStops.at(divider);
         if (qAbs(stops.at(divider) - source) >= 1e-9) {

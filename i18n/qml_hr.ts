@@ -5450,6 +5450,102 @@ Hrvatski: Čč Ćć Đđ Šš Žž — 0123456789</translation>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>Oblikovanje ćelije nije valjano ili je presloženo. Smanjite broj promjena fonta ili stila.</translation>
     </message>
+    <message id="TableStructureQuantity">
+        <source>Quantity</source>
+        <translation>Količina</translation>
+    </message>
+    <message id="TableStructureRowPosition">
+        <source>Insert at row</source>
+        <translation>Umetni na redak</translation>
+    </message>
+    <message id="TableStructureColumnPosition">
+        <source>Insert at column</source>
+        <translation>Umetni na stupac</translation>
+    </message>
+    <message id="TableStructurePositionHint">
+        <source>New rows or columns are inserted before this position. Choose %1 to add at the end.</source>
+        <translation>Novi retci ili stupci umeću se prije ovog položaja. Odaberite %1 za dodavanje na kraj.</translation>
+    </message>
+    <message id="TableStructureRowIndices">
+        <source>Rows to delete</source>
+        <translation>Retci za brisanje</translation>
+    </message>
+    <message id="TableStructureColumnIndices">
+        <source>Columns to delete</source>
+        <translation>Stupci za brisanje</translation>
+    </message>
+    <message id="TableStructureIndicesHint">
+        <source>Enter row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>Unesite brojeve redaka ili stupaca odvojene zarezima, na primjer 1,3,5.</translation>
+    </message>
+    <message id="TableStructureIndicesPlaceholder">
+        <source>Example: 1,3,5</source>
+        <translation>Primjer: 1,3,5</translation>
+    </message>
+    <message id="TableStructureApply">
+        <source>Apply</source>
+        <translation>Primijeni</translation>
+    </message>
+    <message id="TableStructureInvalidNumbers">
+        <source>Enter a valid quantity and insertion position.</source>
+        <translation>Unesite valjanu količinu i položaj umetanja.</translation>
+    </message>
+    <message id="TableInsertInvalidCount">
+        <source>Enter a whole-number quantity from 1 to 20.</source>
+        <translation>Unesite cijeli broj od 1 do 20.</translation>
+    </message>
+    <message id="TableRemoveInvalidIndices">
+        <source>Enter valid row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>Unesite valjane brojeve redaka ili stupaca odvojene zarezima, na primjer 1,3,5.</translation>
+    </message>
+    <message id="TableStructure">
+        <source>Table rows and columns</source>
+        <translation>Redci i stupci tablice</translation>
+    </message>
+    <message id="TableRemoveRow">
+        <source>Delete row</source>
+        <translation>Izbriši redak</translation>
+    </message>
+    <message id="TableRemoveColumn">
+        <source>Delete column</source>
+        <translation>Izbriši stupac</translation>
+    </message>
+    <message id="TableRemoveHint">
+        <source>Deletes the specified rows or columns, including their cell content.</source>
+        <translation>Briše navedene retke ili stupce, uključujući sadržaj njihovih ćelija.</translation>
+    </message>
+    <message id="TableRemoveMinimumDimension">
+        <source>Keep at least one row and one column. To remove the whole table, select it and press Delete.</source>
+        <translation>Zadržite barem jedan redak i jedan stupac. Za brisanje cijele tablice odaberite je i pritisnite Delete.</translation>
+    </message>
+    <message id="TableRemoveTooSmall">
+        <source>The remaining table would be too small. Enlarge its rows or columns first.</source>
+        <translation>Preostala tablica bila bi premala. Najprije povećajte njezine retke ili stupce.</translation>
+    </message>
+    <message id="TableInsertRow">
+        <source>Add row</source>
+        <translation>Dodaj redak</translation>
+    </message>
+    <message id="TableInsertColumn">
+        <source>Add column</source>
+        <translation>Dodaj stupac</translation>
+    </message>
+    <message id="TableInsertSizeHint">
+        <source>Existing cell sizes stay the same. The table expands down or to the right.</source>
+        <translation>Veličine postojećih ćelija ostaju iste. Tablica se širi prema dolje ili udesno.</translation>
+    </message>
+    <message id="TableInsertDimensionLimit">
+        <source>A table supports at most 20 rows and 20 columns.</source>
+        <translation>Tablica podržava najviše 20 redaka i 20 stupaca.</translation>
+    </message>
+    <message id="TableInsertOutsidePage">
+        <source>There is not enough space on this page to add a row or column. Move or resize the table first.</source>
+        <translation>Na ovoj stranici nema dovoljno prostora za dodavanje retka ili stupca. Najprije premjestite tablicu ili joj promijenite veličinu.</translation>
+    </message>
+    <message id="TableCellInvalidFontSize">
+        <source>Enter a whole-number font size from 1 to 512 pt.</source>
+        <translation>Unesite cijeli broj od 1 do 512 pt za veličinu fonta.</translation>
+    </message>
     <message id="TableCellRotation">
         <source>Cell text rotation</source>
         <translation>Rotacija teksta u ćeliji</translation>

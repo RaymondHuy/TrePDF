@@ -21,8 +21,8 @@ Rectangle {
     color: theme.ribbonSurface
 
     function applyFormatting(property, value, restoreFocus = true) {
-        if (property !== "fontSize")
-            fontSizeBox.commitSizeText(false)
+        if (property !== "fontSize" && !fontSizeBox.commitSizeText(false))
+            return
         if (editingState.editorItem)
             editingState.editorItem.applyFormatting(property, value, restoreFocus)
     }
@@ -118,6 +118,7 @@ Rectangle {
 
                 function syncCurrentSize() {
                     pending = false
+                    root.editingState.formatInputValid = true
                     const sizeText = String(root.editingState.fontSize)
                     currentIndex = model.indexOf(sizeText)
                     editText = sizeText
@@ -125,16 +126,25 @@ Rectangle {
 
                 function commitSizeText(restoreFocus = true) {
                     if (!pending)
-                        return
+                        return true
                     const entered = editText.trim()
                     const points = Number(entered)
                     const apply = root.editingState.active && root.editorAvailable
                         && /^[0-9]+$/.test(entered) && Number.isInteger(points)
                         && points >= 1 && points <= 512
+                    if (!apply) {
+                        root.editingState.formatInputValid = false
+                        //% "Enter a whole-number font size from 1 to 512 pt."
+                        root.editingState.errorText = qsTrId("TableCellInvalidFontSize")
+                        return false
+                    }
+                    if (!root.editingState.formatInputValid)
+                        root.editingState.errorText = ""
                     pending = false
-                    if (apply)
-                        root.applyFormatting("fontSize", points, restoreFocus)
+                    root.editingState.formatInputValid = true
+                    root.applyFormatting("fontSize", points, restoreFocus)
                     syncCurrentSize()
+                    return true
                 }
 
                 Layout.fillWidth: true
@@ -160,6 +170,7 @@ Rectangle {
                             fontSizeBox.syncCurrentSize()
                     }
                     function onFormatCommitRequested() { fontSizeBox.commitSizeText(false) }
+                    function onFocusGenerationChanged() { fontSizeBox.syncCurrentSize() }
                 }
 
                 contentItem: TextField {
@@ -311,6 +322,13 @@ Rectangle {
                 color: "#747176"
                 font.pixelSize: 11
                 wrapMode: Text.Wrap
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: root.theme.ribbonBorder
+                Accessible.ignored: true
             }
 
             Button {

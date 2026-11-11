@@ -949,15 +949,17 @@ QVariantMap PDFEditController::candidateAt(int page, qreal x, qreal y)
             const QPointF physical(point.x() * pageSize.width(), point.y() * pageSize.height());
             const auto &rows = draft != m_drafts.cend() ? draft->tableRowStops : candidate.tableRowStops;
             const auto &columns = draft != m_drafts.cend() ? draft->tableColumnStops : candidate.tableColumnStops;
+            const int rowCount = draft != m_drafts.cend() ? draft->tableRows : candidate.tableRows;
+            const int columnCount = draft != m_drafts.cend() ? draft->tableColumns : candidate.tableColumns;
             bool onRule = false;
-            for (int row = 0; row <= candidate.tableRows; ++row) {
-                const qreal ratio = row == 0 ? 0.0 : row == candidate.tableRows ? 1.0
-                    : rows.isEmpty() ? qreal(row) / candidate.tableRows : rows.at(row - 1);
+            for (int row = 0; row <= rowCount; ++row) {
+                const qreal ratio = row == 0 ? 0.0 : row == rowCount ? 1.0
+                    : rows.isEmpty() ? qreal(row) / rowCount : rows.at(row - 1);
                 onRule = onRule || std::abs(physical.y() - inner.top() - ratio * inner.height()) <= tolerance;
             }
-            for (int column = 0; column <= candidate.tableColumns; ++column) {
-                const qreal ratio = column == 0 ? 0.0 : column == candidate.tableColumns ? 1.0
-                    : columns.isEmpty() ? qreal(column) / candidate.tableColumns : columns.at(column - 1);
+            for (int column = 0; column <= columnCount; ++column) {
+                const qreal ratio = column == 0 ? 0.0 : column == columnCount ? 1.0
+                    : columns.isEmpty() ? qreal(column) / columnCount : columns.at(column - 1);
                 onRule = onRule || std::abs(physical.x() - inner.left() - ratio * inner.width()) <= tolerance;
             }
             if (!onRule)

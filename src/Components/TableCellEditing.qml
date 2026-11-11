@@ -30,6 +30,7 @@ QtObject {
     property int focusGeneration: 0
     property bool inputFocused: false
     property TableCellEditor editorItem: null
+    property bool formatInputValid: true
 
     signal focusRequested()
     signal formatCommitRequested()
@@ -80,6 +81,7 @@ QtObject {
         editorState = { cursorPosition: text.length, selectionStart: text.length,
             selectionEnd: text.length, typingPosition: -1 }
         errorText = ""
+        formatInputValid = true
         ++focusGeneration
         active = true
         focusRequested()
@@ -96,6 +98,8 @@ QtObject {
         Qt.inputMethod.commit()
         // qmllint enable missing-property
         formatCommitRequested()
+        if (!formatInputValid)
+            return false
         if (editorItem)
             editorItem.synchronize()
         submitting = true
@@ -128,6 +132,7 @@ QtObject {
         text = ""
         cellFormat = ({})
         editorState = ({})
+        formatInputValid = true
     }
 
     function advance(backward) {

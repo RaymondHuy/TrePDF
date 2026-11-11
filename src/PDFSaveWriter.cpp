@@ -7698,8 +7698,8 @@ PDFSaveWriter::Request PDFSaveWriter::prepare(
             saveDraft.annotationSubtype = FPDF_ANNOT_INK;
         }
         saveDraft.shapeType = draft->candidate.shapeType;
-        saveDraft.tableRows = draft->candidate.tableRows;
-        saveDraft.tableColumns = draft->candidate.tableColumns;
+        saveDraft.tableRows = draft->tableRows;
+        saveDraft.tableColumns = draft->tableColumns;
         saveDraft.tableRowStops = draft->tableRowStops;
         saveDraft.tableColumnStops = draft->tableColumnStops;
         saveDraft.tableCellTexts = draft->tableCellTexts;

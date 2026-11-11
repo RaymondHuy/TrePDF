@@ -15,6 +15,50 @@ Undo/Redo hoạt động như các Shape khác. Bảng không có màu tô;
 chưa hỗ trợ gộp ô.
 Số hàng/cột chọn trong popup chỉ áp dụng cho bảng mới.
 
+## Thêm, xóa hàng và cột
+
+Chọn bảng để mở phần **Hàng và cột của bảng** trong panel thuộc tính bên phải.
+Bấm **Thêm hàng** hoặc **Thêm cột** để mở popup chọn số lượng và vị trí
+bắt đầu. Vị trí đánh số từ 1, chèn trước hàng/cột đang có tại số đó; chọn
+vị trí bằng số hàng/cột hiện tại cộng 1 để thêm ở cuối. Mặc định thêm một
+hàng/cột cuối bảng. Ví dụ bảng có 4 hàng, thêm 2 hàng tại vị trí 3 tạo hai
+hàng trống mới ở vị trí 3–4; hai hàng cũ 3–4 chuyển thành 5–6.
+
+Khi đang sửa nội dung ô, panel Thuộc tính ô chỉ cung cấp định dạng nội dung.
+Hoàn tất hoặc hủy sửa ô để trở về panel thuộc tính bảng và sử dụng các nút
+thêm/xóa hàng, cột.
+
+Các ô cũ giữ nguyên kích thước vật lý, bảng mở rộng xuống dưới hoặc sang phải.
+Hàng/cột mới lấy kích thước, định dạng mặc định và góc xoay từ hàng/cột tại
+vị trí chèn; khi thêm cuối bảng thì lấy từ hàng/cột cuối. Ô mới trống, các ô
+cũ giữ nội dung và định dạng theo vị trí mới. Nếu bảng vượt mép trang hoặc
+giới hạn Header/Footer đang sửa,
+thao tác báo lỗi để người dùng di chuyển hoặc thu nhỏ bảng trước. Mỗi chiều
+vẫn tối đa 20; các nút tương ứng bị vô hiệu hóa khi đạt giới hạn.
+
+Nội dung và cỡ chữ đang nhập phải hợp lệ trước khi chèn. Hoàn tất phần đang
+nhập và chèn hàng/cột là hai bước Undo riêng; cả nhóm được thêm trong một
+lần Áp dụng là một thay đổi nguyên tử, hỗ trợ Undo/Redo, Discard và Save/Save As.
+Bảng mở lại tiếp tục
+chèn và kéo đường phân cách được. Khung bảng nhận diện từ PDF cũng chèn được,
+nhưng chữ/ảnh nguồn độc lập vẫn giữ nguyên vị trí như các thao tác khung khác.
+
+**Xóa hàng** hoặc **Xóa cột** mở popup nhập các số thứ tự, ngăn cách bằng dấu
+phẩy, ví dụ `1,3,5`. Các số được hiểu theo bảng trước khi xóa, không cần sắp
+xếp; số trùng chỉ xóa một lần. Cho phép khoảng trắng, không nhận khoảng số,
+số thập phân, mục trống hoặc số ngoài bảng. Mặc định điền số cuối cùng.
+Áp dụng xóa toàn bộ nhóm trong một bước Undo, gồm nội dung và định dạng của
+các ô đó. Khung bảng thu gọn từ dưới/phải, các hàng/cột còn lại dồn về
+trên/trái và giữ kích thước, nội dung, định dạng.
+Luôn giữ ít nhất một hàng và một cột; nút xóa tương ứng bị vô hiệu hóa khi
+chỉ còn một. Muốn xóa cả bảng, chọn bảng rồi nhấn Delete.
+
+Lỗi giữ popup và phần đã nhập để sửa, không thay đổi bảng hoặc lịch sử.
+Hủy/Escape đóng popup mà không áp dụng. Đổi bảng/tài liệu, lưu hoặc thay đổi
+lịch sử đóng popup để không áp dụng nhầm đối tượng. Undo khôi phục cả khung
+lẫn nội dung ô bị xóa; Save/mở lại giữ đúng bảng đã thu gọn. Với khung nguồn chỉ
+nhận diện đường kẻ, chữ/ảnh PDF độc lập vẫn giữ nguyên khi xóa hàng/cột.
+
 ## Khung bảng có sẵn trong PDF
 
 TrePDF tự nhận diện khung lưới kín từ các nét thẳng hoặc dải chữ nhật mảnh
@@ -83,6 +127,8 @@ và góc xoay; Hủy/Escape bỏ phần thay đổi đang nhập.
 `TableShape` được thêm cuối enum `ShapeType`, dùng `AddShapeTool` và pipeline
 `addedShape`/`sourceShape` hiện có. Cấu hình `tableRows`/`tableColumns` thuộc
 controller của tài liệu; mỗi candidate chụp riêng hai giá trị khi được tạo.
+Draft giữ số hàng/cột hiện tại để chèn mà không sửa metadata nguồn của
+candidate; Save vẫn đối chiếu fingerprint và cấu trúc nguồn trước khi ghi mới.
 `tableRowStops`/`tableColumnStops` giữ vị trí đường phân cách trong khung vẽ
 bên trong, với tỉ lệ từ 0 đến 1; vector rỗng tương đương chia đều. Candidate
 giữ giá trị gốc, Draft giữ giá trị đã sửa. Move/resize khung giữ tỉ lệ này và
@@ -159,6 +205,13 @@ giới hạn số hàng/cột, Undo/Redo, hit-test, move/resize, round-trip vớ
 xoay/CropBox, grid lớn, marker sai và thao tác qua popup/overlay. Kiểm thử ô
 bao gồm chuẩn hóa Unicode, giới hạn/overflow, lịch sử nguyên tử và chữ PDF
 thực sau Save, mở lại, sửa và xóa bảng.
+Kiểm thử chèn hàng/cột bao gồm vị trí đầu/giữa/cuối, kích thước ô không đều,
+dịch chuyển nội dung/định dạng/góc xoay, ô trống kế thừa style, giới hạn trang,
+Undo/Redo, Discard, khung nguồn, lưu/mở lại và thao tác từ panel thuộc tính bảng.
+Popup kiểm số lượng/vị trí thêm, danh sách xóa, hủy, lỗi và đổi đối tượng;
+panel Thuộc tính ô không có nút thêm/xóa hàng, cột.
+Kiểm thử xóa kiểm tra kích thước ô không đều, nội dung/định dạng còn lại,
+Undo/Redo, giới hạn 1×1, lưu/mở lại và chữ nguồn độc lập.
 
 Chạy suite Shape sau khi build `trepdf_edit_controller_tests`; build app và
 `trepdf_qmllint` để kiểm tra tích hợp QML. Kiểm tra trực quan popup và preview

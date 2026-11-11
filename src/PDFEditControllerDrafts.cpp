@@ -808,9 +808,9 @@ QVariantMap PDFEditController::candidateMap(const Draft &draft) const
         static_cast<int>(candidate.shapeType));
     map.insert(QStringLiteral("shapeStart"), candidate.shapeStartRatio);
     map.insert(QStringLiteral("shapeEnd"), candidate.shapeEndRatio);
-    map.insert(QStringLiteral("tableRows"), candidate.tableRows);
+    map.insert(QStringLiteral("tableRows"), draft.tableRows);
     map.insert(QStringLiteral("tableFrameOnly"), candidate.tableFrameOnly);
-    map.insert(QStringLiteral("tableColumns"), candidate.tableColumns);
+    map.insert(QStringLiteral("tableColumns"), draft.tableColumns);
     map.insert(QStringLiteral("tableCellTexts"), draft.tableCellTexts);
     QVariantList tableFormats;
     for (const auto &format : draft.tableCellFormats)
@@ -1050,6 +1050,8 @@ bool PDFEditController::sameDraftContent(const Draft &left, const Draft &right)
         && left.frameRect == right.frameRect
         && left.contentBounds == right.contentBounds
         && left.imageQuarterTurns == right.imageQuarterTurns
+        && left.tableRows == right.tableRows
+        && left.tableColumns == right.tableColumns
         && left.tableRowStops == right.tableRowStops
         && left.tableColumnStops == right.tableColumnStops
         && left.tableCellTexts == right.tableCellTexts

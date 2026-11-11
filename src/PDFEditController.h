@@ -535,6 +535,14 @@ public:
     Q_INVOKABLE void updateSelectedFrameRect(const QRectF &frameRect);
     Q_INVOKABLE void updateSelectedTableDivider(bool column, int index, qreal position);
     Q_INVOKABLE QString setSelectedTableCellText(int row, int column, const QString &text);
+    Q_INVOKABLE QString insertSelectedTableRow(int beforeRow);
+    Q_INVOKABLE QString insertSelectedTableColumn(int beforeColumn);
+    Q_INVOKABLE QString insertSelectedTableRows(int beforeRow, int count);
+    Q_INVOKABLE QString insertSelectedTableColumns(int beforeColumn, int count);
+    Q_INVOKABLE QString removeSelectedTableRow();
+    Q_INVOKABLE QString removeSelectedTableColumn();
+    Q_INVOKABLE QString removeSelectedTableRows(const QString &indices);
+    Q_INVOKABLE QString removeSelectedTableColumns(const QString &indices);
     Q_INVOKABLE QString setSelectedTableCellContent(int row, int column, const QString &text,
                                                    const QVariantMap &format);
     Q_INVOKABLE void initializeTableCellEditor(QQuickTextDocument *document, const QString &text,
@@ -920,6 +928,8 @@ private:
 
     struct Draft {
         Candidate candidate;
+        int tableRows = 0;
+        int tableColumns = 0;
         QVector<qreal> tableRowStops;
         QVector<qreal> tableColumnStops;
         QStringList tableCellTexts;
@@ -1212,6 +1222,8 @@ private:
     static bool sameDraftContent(const Draft &left, const Draft &right);
     QVector<QRectF> tableCellRects(const Draft &draft) const;
     bool tableCellTextFits(const Draft &draft) const;
+    QString insertSelectedTableTrack(bool column, int beforeIndex, int count);
+    QString removeSelectedTableTrack(bool column, const QString &indices, bool lastOnly = false);
     static bool isSourceTextMoveOnly(const Draft &draft);
     static TextChange setDraftText(
         Draft &draft,

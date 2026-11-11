@@ -3266,6 +3266,8 @@ PDFEditController::Draft PDFEditController::initialDraftForCandidate(
 {
     Draft draft;
     draft.candidate = candidate;
+    draft.tableRows = candidate.tableRows;
+    draft.tableColumns = candidate.tableColumns;
     draft.tableRowStops = candidate.tableRowStops;
     draft.tableColumnStops = candidate.tableColumnStops;
     draft.tableCellTexts = candidate.tableCellTexts;
