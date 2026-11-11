@@ -5448,6 +5448,102 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</source>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>รูปแบบเซลล์ไม่ถูกต้องหรือซับซ้อนเกินไป โปรดลดจำนวนครั้งที่เปลี่ยนแบบอักษรหรือรูปแบบตัวอักษร</translation>
     </message>
+    <message id="TableStructureQuantity">
+        <source>Quantity</source>
+        <translation>จำนวน</translation>
+    </message>
+    <message id="TableStructureRowPosition">
+        <source>Insert at row</source>
+        <translation>แทรกที่แถว</translation>
+    </message>
+    <message id="TableStructureColumnPosition">
+        <source>Insert at column</source>
+        <translation>แทรกที่คอลัมน์</translation>
+    </message>
+    <message id="TableStructurePositionHint">
+        <source>New rows or columns are inserted before this position. Choose %1 to add at the end.</source>
+        <translation>แทรกแถวหรือคอลัมน์ใหม่ก่อนตำแหน่งนี้ เลือก %1 เพื่อเพิ่มต่อท้าย</translation>
+    </message>
+    <message id="TableStructureRowIndices">
+        <source>Rows to delete</source>
+        <translation>แถวที่จะลบ</translation>
+    </message>
+    <message id="TableStructureColumnIndices">
+        <source>Columns to delete</source>
+        <translation>คอลัมน์ที่จะลบ</translation>
+    </message>
+    <message id="TableStructureIndicesHint">
+        <source>Enter row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>ป้อนหมายเลขแถวหรือคอลัมน์คั่นด้วยจุลภาค เช่น 1,3,5</translation>
+    </message>
+    <message id="TableStructureIndicesPlaceholder">
+        <source>Example: 1,3,5</source>
+        <translation>ตัวอย่าง: 1,3,5</translation>
+    </message>
+    <message id="TableStructureApply">
+        <source>Apply</source>
+        <translation>นำไปใช้</translation>
+    </message>
+    <message id="TableStructureInvalidNumbers">
+        <source>Enter a valid quantity and insertion position.</source>
+        <translation>ป้อนจำนวนและตำแหน่งแทรกที่ถูกต้อง</translation>
+    </message>
+    <message id="TableInsertInvalidCount">
+        <source>Enter a whole-number quantity from 1 to 20.</source>
+        <translation>ป้อนจำนวนเต็มตั้งแต่ 1 ถึง 20</translation>
+    </message>
+    <message id="TableRemoveInvalidIndices">
+        <source>Enter valid row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>ป้อนหมายเลขแถวหรือคอลัมน์ที่ถูกต้องคั่นด้วยจุลภาค เช่น 1,3,5</translation>
+    </message>
+    <message id="TableStructure">
+        <source>Table rows and columns</source>
+        <translation>แถวและคอลัมน์ของตาราง</translation>
+    </message>
+    <message id="TableRemoveRow">
+        <source>Delete row</source>
+        <translation>ลบแถว</translation>
+    </message>
+    <message id="TableRemoveColumn">
+        <source>Delete column</source>
+        <translation>ลบคอลัมน์</translation>
+    </message>
+    <message id="TableRemoveHint">
+        <source>Deletes the specified rows or columns, including their cell content.</source>
+        <translation>ลบแถวหรือคอลัมน์ที่ระบุ รวมถึงเนื้อหาในเซลล์เหล่านั้น</translation>
+    </message>
+    <message id="TableRemoveMinimumDimension">
+        <source>Keep at least one row and one column. To remove the whole table, select it and press Delete.</source>
+        <translation>ต้องมีอย่างน้อยหนึ่งแถวและหนึ่งคอลัมน์ หากต้องการลบทั้งตาราง ให้เลือกตารางแล้วกด Delete</translation>
+    </message>
+    <message id="TableRemoveTooSmall">
+        <source>The remaining table would be too small. Enlarge its rows or columns first.</source>
+        <translation>ตารางที่เหลือจะมีขนาดเล็กเกินไป ให้ขยายแถวหรือคอลัมน์ก่อน</translation>
+    </message>
+    <message id="TableInsertRow">
+        <source>Add row</source>
+        <translation>เพิ่มแถว</translation>
+    </message>
+    <message id="TableInsertColumn">
+        <source>Add column</source>
+        <translation>เพิ่มคอลัมน์</translation>
+    </message>
+    <message id="TableInsertSizeHint">
+        <source>Existing cell sizes stay the same. The table expands down or to the right.</source>
+        <translation>ขนาดเซลล์เดิมจะคงเดิม ตารางจะขยายลงด้านล่างหรือไปทางขวา</translation>
+    </message>
+    <message id="TableInsertDimensionLimit">
+        <source>A table supports at most 20 rows and 20 columns.</source>
+        <translation>ตารางรองรับได้สูงสุด 20 แถวและ 20 คอลัมน์</translation>
+    </message>
+    <message id="TableInsertOutsidePage">
+        <source>There is not enough space on this page to add a row or column. Move or resize the table first.</source>
+        <translation>หน้านี้มีพื้นที่ไม่พอสำหรับเพิ่มแถวหรือคอลัมน์ โปรดย้ายหรือปรับขนาดตารางก่อน</translation>
+    </message>
+    <message id="TableCellInvalidFontSize">
+        <source>Enter a whole-number font size from 1 to 512 pt.</source>
+        <translation>ป้อนขนาดตัวอักษรเป็นจำนวนเต็มตั้งแต่ 1 ถึง 512 pt</translation>
+    </message>
     <message id="TableCellRotation">
         <source>Cell text rotation</source>
         <translation>หมุนข้อความในเซลล์</translation>

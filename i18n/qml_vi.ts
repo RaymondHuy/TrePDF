@@ -5571,6 +5571,102 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>Định dạng ô không hợp lệ hoặc quá phức tạp. Hãy giảm số lần đổi font hoặc kiểu chữ.</translation>
     </message>
+    <message id="TableStructureQuantity">
+        <source>Quantity</source>
+        <translation>Số lượng</translation>
+    </message>
+    <message id="TableStructureRowPosition">
+        <source>Insert at row</source>
+        <translation>Chèn tại hàng thứ</translation>
+    </message>
+    <message id="TableStructureColumnPosition">
+        <source>Insert at column</source>
+        <translation>Chèn tại cột thứ</translation>
+    </message>
+    <message id="TableStructurePositionHint">
+        <source>New rows or columns are inserted before this position. Choose %1 to add at the end.</source>
+        <translation>Chèn trước hàng/cột tại vị trí này. Chọn %1 để thêm vào cuối bảng.</translation>
+    </message>
+    <message id="TableStructureRowIndices">
+        <source>Rows to delete</source>
+        <translation>Các hàng cần xóa</translation>
+    </message>
+    <message id="TableStructureColumnIndices">
+        <source>Columns to delete</source>
+        <translation>Các cột cần xóa</translation>
+    </message>
+    <message id="TableStructureIndicesHint">
+        <source>Enter row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>Nhập số thứ tự hàng/cột, ngăn cách bằng dấu phẩy, ví dụ 1,3,5.</translation>
+    </message>
+    <message id="TableStructureIndicesPlaceholder">
+        <source>Example: 1,3,5</source>
+        <translation>Ví dụ: 1,3,5</translation>
+    </message>
+    <message id="TableStructureApply">
+        <source>Apply</source>
+        <translation>Áp dụng</translation>
+    </message>
+    <message id="TableStructureInvalidNumbers">
+        <source>Enter a valid quantity and insertion position.</source>
+        <translation>Nhập số lượng và vị trí chèn hợp lệ.</translation>
+    </message>
+    <message id="TableInsertInvalidCount">
+        <source>Enter a whole-number quantity from 1 to 20.</source>
+        <translation>Nhập số lượng là số nguyên từ 1 đến 20.</translation>
+    </message>
+    <message id="TableRemoveInvalidIndices">
+        <source>Enter valid row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>Nhập số thứ tự hàng/cột hợp lệ, ngăn cách bằng dấu phẩy, ví dụ 1,3,5.</translation>
+    </message>
+    <message id="TableStructure">
+        <source>Table rows and columns</source>
+        <translation>Hàng và cột của bảng</translation>
+    </message>
+    <message id="TableRemoveRow">
+        <source>Delete row</source>
+        <translation>Xóa hàng</translation>
+    </message>
+    <message id="TableRemoveColumn">
+        <source>Delete column</source>
+        <translation>Xóa cột</translation>
+    </message>
+    <message id="TableRemoveHint">
+        <source>Deletes the specified rows or columns, including their cell content.</source>
+        <translation>Xóa các hàng/cột được chỉ định, bao gồm nội dung trong các ô đó.</translation>
+    </message>
+    <message id="TableRemoveMinimumDimension">
+        <source>Keep at least one row and one column. To remove the whole table, select it and press Delete.</source>
+        <translation>Bảng cần có ít nhất một hàng và một cột. Muốn xóa cả bảng, chọn bảng rồi nhấn Delete.</translation>
+    </message>
+    <message id="TableRemoveTooSmall">
+        <source>The remaining table would be too small. Enlarge its rows or columns first.</source>
+        <translation>Phần bảng còn lại quá nhỏ. Hãy tăng kích thước hàng hoặc cột trước.</translation>
+    </message>
+    <message id="TableInsertRow">
+        <source>Add row</source>
+        <translation>Thêm hàng</translation>
+    </message>
+    <message id="TableInsertColumn">
+        <source>Add column</source>
+        <translation>Thêm cột</translation>
+    </message>
+    <message id="TableInsertSizeHint">
+        <source>Existing cell sizes stay the same. The table expands down or to the right.</source>
+        <translation>Giữ nguyên kích thước các ô cũ. Bảng mở rộng xuống dưới hoặc sang phải.</translation>
+    </message>
+    <message id="TableInsertDimensionLimit">
+        <source>A table supports at most 20 rows and 20 columns.</source>
+        <translation>Bảng hỗ trợ tối đa 20 hàng và 20 cột.</translation>
+    </message>
+    <message id="TableInsertOutsidePage">
+        <source>There is not enough space on this page to add a row or column. Move or resize the table first.</source>
+        <translation>Trang này không còn đủ chỗ để thêm hàng hoặc cột. Hãy di chuyển hoặc đổi kích thước bảng trước.</translation>
+    </message>
+    <message id="TableCellInvalidFontSize">
+        <source>Enter a whole-number font size from 1 to 512 pt.</source>
+        <translation>Nhập cỡ chữ là số nguyên từ 1 đến 512 pt.</translation>
+    </message>
     <message id="TableCellRotation">
         <source>Cell text rotation</source>
         <translation>Xoay chữ trong ô</translation>

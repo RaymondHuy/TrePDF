@@ -1688,6 +1688,646 @@ void PDFEditControllerTest::addsTableWithAtomicHistory()
 }
 
 
+void PDFEditControllerTest::insertsTableTracksWithAtomicHistory_data()
+{
+    QTest::addColumn<bool>("column");
+    QTest::addColumn<int>("beforeIndex");
+    for (bool column : {false, true}) {
+        for (int index = 0; index <= 2; ++index)
+            QTest::newRow(qPrintable(QStringLiteral("%1-%2")
+                .arg(column ? QStringLiteral("column") : QStringLiteral("row")).arg(index)))
+                << column << index;
+    }
+}
+
+void PDFEditControllerTest::insertsTableTracksWithAtomicHistory()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(bool, column);
+    QFETCH(int, beforeIndex);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("insert-track-%1.pdf")
+        .arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.45, .45)).isEmpty());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(false, 0, .4);
+    controller.updateSelectedTableDivider(true, 0, .3);
+    controller.finishSelectedFrameResize();
+    const QStringList texts{QStringLiteral("AB"), QStringLiteral("CD"), QStringLiteral("EF"), QStringLiteral("GH")};
+    QVector<Cell> formats;
+    for (int index = 0; index < 4; ++index) {
+        const Style style{testFontFamily(), index % 2 != 0, index / 2 != 0, index == 3, qreal(12 + index)};
+        Cell format = plain(texts.at(index), style);
+        format.rotation = index * 90;
+        // Character formatting must move with existing text, but is not copied into blank cells.
+        format.spans = {{0, 1, style}, {1, 1, {style.family, !style.bold, style.italic, style.underline, style.fontSize}}};
+        const QString error = controller.setSelectedTableCellContent(index / 2, index % 2, texts.at(index), toVariant(format));
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        formats.append(format);
+    }
+    const QVariantMap before = controller.selectedDraftPreview();
+    const QRectF oldFrame = controller.selectedFrameRect();
+    const QVariantList oldRects = before.value(QStringLiteral("tableCellRects")).toList();
+    QCOMPARE(oldRects.size(), 4);
+    const QString error = column ? controller.insertSelectedTableColumn(beforeIndex)
+                                 : controller.insertSelectedTableRow(beforeIndex);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const QVariantMap after = controller.selectedDraftPreview();
+    const int rows = column ? 2 : 3;
+    const int columns = column ? 3 : 2;
+    QCOMPARE(after.value(QStringLiteral("tableRows")).toInt(), rows);
+    QCOMPARE(after.value(QStringLiteral("tableColumns")).toInt(), columns);
+    QCOMPARE(controller.selectedFrameRect().topLeft(), oldFrame.topLeft());
+    const QVariantList rects = after.value(QStringLiteral("tableCellRects")).toList();
+    const QStringList actualTexts = after.value(QStringLiteral("tableCellTexts")).toStringList();
+    const QVariantList actualFormats = after.value(QStringLiteral("tableCellFormats")).toList();
+    QCOMPARE(rects.size(), rows * columns);
+    QCOMPARE(actualTexts.size(), rows * columns);
+    QCOMPARE(actualFormats.size(), rows * columns);
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < columns; ++col) {
+            const bool inserted = (column ? col : row) == beforeIndex;
+            const int oldRow = column ? row : inserted ? qMin(beforeIndex, 1) : row - (row > beforeIndex);
+            const int oldCol = !column ? col : inserted ? qMin(beforeIndex, 1) : col - (col > beforeIndex);
+            const int oldIndex = oldRow * 2 + oldCol;
+            const int index = row * columns + col;
+            QCOMPARE(actualTexts.at(index), inserted ? QString() : texts.at(oldIndex));
+            Cell expected = formats.at(oldIndex);
+            if (inserted)
+                expected.spans.clear();
+            QCOMPARE(actualFormats.at(index).toMap(), toVariant(expected));
+            const QSizeF oldSize = oldRects.at(oldIndex).toRectF().size();
+            const QSizeF size = rects.at(index).toRectF().size();
+            QVERIFY(qAbs(size.width() - oldSize.width()) < .000001);
+            QVERIFY(qAbs(size.height() - oldSize.height()) < .000001);
+        }
+    }
+    const QSizeF pageSize = document.pageSize(0);
+    const qreal stroke = qMax<qreal>(.75, before.value(QStringLiteral("shapeStrokeWidthRatio")).toReal() * pageSize.height());
+    const qreal fraction = column ? (beforeIndex == 0 ? .3 : .7) : (beforeIndex == 0 ? .4 : .6);
+    const qreal extra = ((column ? oldFrame.width() * pageSize.width() : oldFrame.height() * pageSize.height()) - stroke) * fraction;
+    QVERIFY(qAbs(controller.selectedFrameRect().width() - oldFrame.width() - (column ? extra / pageSize.width() : 0)) < .000001);
+    QVERIFY(qAbs(controller.selectedFrameRect().height() - oldFrame.height() - (column ? 0 : extra / pageSize.height())) < .000001);
+    controller.undo();
+    QCOMPARE(controller.selectedDraftPreview(), before);
+    controller.redo();
+    QCOMPARE(controller.selectedDraftPreview(), after);
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::savesInsertedTableTracks_data()
+{
+    QTest::addColumn<bool>("rotated");
+    QTest::newRow("legacy-v2") << false;
+    QTest::newRow("rotated-v8") << true;
+}
+
+void PDFEditControllerTest::savesInsertedTableTracks()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(bool, rotated);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("insert-saved-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("insert-saved-result-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(path, rotated ? 1 : 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.35, .35)).isEmpty());
+    Cell format = plain(QStringLiteral("Keep"), {testFontFamily(), true, false, true, 14});
+    format.rotation = 270;
+    if (rotated)
+        QVERIFY(controller.setSelectedTableCellContent(1, 1, QStringLiteral("Keep"), toVariant(format)).isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(readTableTestMetadata(saved).value(QStringLiteral("version")).toInt(), rotated ? 8 : 2);
+    auto table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    const auto original = controller.selectedDraftPreview();
+    QVERIFY(controller.insertSelectedTableRow(1).isEmpty());
+    QVERIFY(controller.insertSelectedTableColumn(2).isEmpty());
+    const auto inserted = controller.selectedDraftPreview();
+    QCOMPARE(inserted.value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(inserted.value(QStringLiteral("tableColumns")).toInt(), 3);
+    controller.undo();
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 2);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedDraftPreview(), original);
+    controller.redo();
+    controller.redo();
+    QCOMPARE(controller.selectedDraftPreview(), inserted);
+    controller.discardDrafts();
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedDraftPreview(), original);
+    QVERIFY(controller.insertSelectedTableRow(1).isEmpty());
+    QVERIFY(controller.insertSelectedTableColumn(2).isEmpty());
+    QVERIFY(controller.save());
+
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QVERIFY(!table.isEmpty());
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), 3);
+    QCOMPARE(table.value(QStringLiteral("tableCellTexts")), inserted.value(QStringLiteral("tableCellTexts")));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")), inserted.value(QStringLiteral("tableCellFormats")));
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    if (rotated) {
+        QCOMPARE(table.value(QStringLiteral("tableCellTexts")).toStringList().at(7), QStringLiteral("Keep"));
+        QCOMPARE(table.value(QStringLiteral("tableCellFormats")).toList().at(7).toMap(), toVariant(format));
+    }
+    // Further insertion and divider editing must validate against the saved source's own dimensions.
+    QVERIFY(reopened.insertSelectedTableRow(0).isEmpty());
+    QVERIFY(reopened.insertSelectedTableColumn(3).isEmpty());
+    const auto beforeDivider = reopened.selectedDraftPreview();
+    const qreal lastStop = beforeDivider.value(QStringLiteral("tableColumnStops")).toList().last().toReal();
+    reopened.beginSelectedFrameResize();
+    reopened.updateSelectedTableDivider(true, 2, lastStop + .02);
+    reopened.finishSelectedFrameResize();
+    QVERIFY(reopened.selectedDraftPreview().value(QStringLiteral("tableColumnStops"))
+        != beforeDivider.value(QStringLiteral("tableColumnStops")));
+    QVERIFY(reopened.save());
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), 4);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), 4);
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    reopened.deleteSelectedObject();
+    QVERIFY(reopened.save());
+    QCOMPARE(topLevelPageObjectCount(saved), 0);
+    QVERIFY(pageText(saved).trimmed().isEmpty());
+}
+
+void PDFEditControllerTest::rejectsInvalidTableTrackInsertion()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("insert-track-invalid.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.insertSelectedTableRow(0).isEmpty());
+    QVERIFY(!controller.insertSelectedTableColumn(0).isEmpty());
+    controller.setShapeType(PDFEditController::RectangleShape);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.4, .4)).isEmpty());
+    QVERIFY(!controller.insertSelectedTableRow(0).isEmpty());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.75, .75), QPointF(.95, .95)).isEmpty());
+    const auto before = controller.selectedDraftPreview();
+    for (int index : {-1, 0, 2, 3}) {
+        QVERIFY(!controller.insertSelectedTableRow(index).isEmpty());
+        QVERIFY(!controller.insertSelectedTableColumn(index).isEmpty());
+        QCOMPARE(controller.selectedDraftPreview(), before);
+    }
+    controller.undo(); // Every rejection leaves only creation on the undo stack.
+    QVERIFY(!controller.hasDrafts());
+    controller.setTableRows(20);
+    controller.setTableColumns(20);
+    QVERIFY(!controller.addShape(0, QPointF(.05, .05), QPointF(.45, .45)).isEmpty());
+    QVERIFY(!controller.insertSelectedTableRow(20).isEmpty());
+    QVERIFY(!controller.insertSelectedTableColumn(0).isEmpty());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .04), QPointF(.4, .12)).isEmpty());
+    controller.setHeaderSelectionOnly(true);
+    QVERIFY(!controller.selectedObjectId().isEmpty());
+    const auto header = controller.selectedDraftPreview();
+    QVERIFY(!controller.insertSelectedTableRow(2).isEmpty());
+    QCOMPARE(controller.selectedDraftPreview(), header);
+    controller.setHeaderSelectionOnly(false);
+    QVERIFY(controller.insertSelectedTableRow(2).isEmpty());
+    controller.undo();
+    QCOMPARE(controller.selectedDraftPreview(), header);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::removesTableTracksWithAtomicHistory_data()
+{
+    QTest::addColumn<bool>("column");
+    QTest::newRow("last-row") << false;
+    QTest::newRow("last-column") << true;
+}
+
+void PDFEditControllerTest::removesTableTracksWithAtomicHistory()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(bool, column);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("remove-track-%1.pdf")
+        .arg(QString::fromLatin1(QTest::currentDataTag())));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.8, .8)).isEmpty());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(false, 0, .2);
+    controller.updateSelectedTableDivider(false, 1, .6);
+    controller.updateSelectedTableDivider(true, 0, .3);
+    controller.updateSelectedTableDivider(true, 1, .75);
+    controller.finishSelectedFrameResize();
+    for (int index = 0; index < 9; ++index) {
+        const QString text = QStringLiteral("%1x").arg(index);
+        const Style style{testFontFamily(), index % 2 != 0, index % 3 == 0, true, qreal(12 + index)};
+        Cell format{style, {{0, 1, style}, {1, 1, {style.family, !style.bold, style.italic, false, style.fontSize}}}};
+        format.rotation = (index % 4) * 90;
+        const QString error = controller.setSelectedTableCellContent(index / 3, index % 3, text, toVariant(format));
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+    }
+    const QVariantMap before = controller.selectedDraftPreview();
+    const QRectF oldFrame = controller.selectedFrameRect();
+    const QString error = column ? controller.removeSelectedTableColumn() : controller.removeSelectedTableRow();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const QVariantMap after = controller.selectedDraftPreview();
+    const int rows = column ? 3 : 2;
+    const int columns = column ? 2 : 3;
+    QCOMPARE(after.value(QStringLiteral("tableRows")).toInt(), rows);
+    QCOMPARE(after.value(QStringLiteral("tableColumns")).toInt(), columns);
+    QCOMPARE(controller.selectedFrameRect().topLeft(), oldFrame.topLeft());
+    const auto oldRects = before.value(QStringLiteral("tableCellRects")).toList();
+    const auto rects = after.value(QStringLiteral("tableCellRects")).toList();
+    const auto oldTexts = before.value(QStringLiteral("tableCellTexts")).toStringList();
+    const auto texts = after.value(QStringLiteral("tableCellTexts")).toStringList();
+    const auto oldFormats = before.value(QStringLiteral("tableCellFormats")).toList();
+    const auto formats = after.value(QStringLiteral("tableCellFormats")).toList();
+    QCOMPARE(rects.size(), rows * columns);
+    QCOMPARE(texts.size(), rows * columns);
+    QCOMPARE(formats.size(), rows * columns);
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < columns; ++col) {
+            const int oldIndex = row * 3 + col;
+            const int index = row * columns + col;
+            QCOMPARE(texts.at(index), oldTexts.at(oldIndex));
+            QCOMPARE(formats.at(index), oldFormats.at(oldIndex));
+            const QRectF oldRect = oldRects.at(oldIndex).toRectF();
+            const QRectF rect = rects.at(index).toRectF();
+            QVERIFY(QLineF(oldRect.topLeft(), rect.topLeft()).length() < .000001);
+            QVERIFY(QLineF(oldRect.bottomRight(), rect.bottomRight()).length() < .000001);
+        }
+    }
+    const QSizeF pageSize = document.pageSize(0);
+    const qreal stroke = qMax<qreal>(.75, before.value(QStringLiteral("shapeStrokeWidthRatio")).toReal() * pageSize.height());
+    const qreal removed = ((column ? oldFrame.width() * pageSize.width() : oldFrame.height() * pageSize.height()) - stroke)
+        * (column ? .25 : .4);
+    QVERIFY(qAbs(controller.selectedFrameRect().width() - oldFrame.width() + (column ? removed / pageSize.width() : 0)) < .000001);
+    QVERIFY(qAbs(controller.selectedFrameRect().height() - oldFrame.height() + (column ? 0 : removed / pageSize.height())) < .000001);
+    controller.undo();
+    QCOMPARE(controller.selectedDraftPreview(), before);
+    controller.redo();
+    QCOMPARE(controller.selectedDraftPreview(), after);
+    controller.discardDrafts();
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::savesRemovedTableTracks_data()
+{
+    QTest::addColumn<int>("pageRotation");
+    QTest::newRow("upright") << 0;
+    QTest::newRow("rotated-page") << 1;
+}
+
+void PDFEditControllerTest::savesRemovedTableTracks()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(int, pageRotation);
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("remove-saved-%1.pdf").arg(pageRotation));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("remove-saved-result-%1.pdf").arg(pageRotation));
+    QVERIFY(createTableTestPage(path, pageRotation));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(2);
+    controller.setTableColumns(2);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.8, .8)).isEmpty());
+    const QStringList texts{QStringLiteral("Keep"), QStringLiteral("Column"), QStringLiteral("Row"), QStringLiteral("Both")};
+    for (int index = 0; index < 4; ++index) {
+        Cell format = plain(texts.at(index), {testFontFamily(), index % 2 == 0, index % 2 != 0, true, qreal(12 + index)});
+        format.rotation = index * 90;
+        QVERIFY(controller.setSelectedTableCellContent(index / 2, index % 2, texts.at(index), toVariant(format)).isEmpty());
+    }
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    auto table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    const auto original = controller.selectedDraftPreview();
+    QVERIFY(controller.removeSelectedTableRow().isEmpty());
+    QVERIFY(controller.removeSelectedTableColumn().isEmpty());
+    const auto reduced = controller.selectedDraftPreview();
+    QCOMPARE(reduced.value(QStringLiteral("tableCellTexts")).toStringList(), QStringList{QStringLiteral("Keep")});
+    controller.undo();
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedDraftPreview(), original);
+    controller.redo();
+    controller.redo();
+    QCOMPARE(controller.selectedDraftPreview(), reduced);
+    controller.discardDrafts();
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    QCOMPARE(controller.selectedDraftPreview(), original);
+    QVERIFY(controller.removeSelectedTableRow().isEmpty());
+    QVERIFY(controller.save());
+    QVERIFY(pageText(saved).contains(QStringLiteral("Keep")));
+    QVERIFY(pageText(saved).contains(QStringLiteral("Column")));
+    QVERIFY(!pageText(saved).contains(QStringLiteral("Row")));
+    QVERIFY(!pageText(saved).contains(QStringLiteral("Both")));
+
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), 1);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), 2);
+    QCOMPARE(table.value(QStringLiteral("tableCellTexts")).toStringList(), texts.first(2));
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(reopened.removeSelectedTableColumn().isEmpty());
+    QVERIFY(reopened.save());
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), 1);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), 1);
+    QCOMPARE(table.value(QStringLiteral("tableCellTexts")), reduced.value(QStringLiteral("tableCellTexts")));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")), reduced.value(QStringLiteral("tableCellFormats")));
+    QVERIFY(table.value(QStringLiteral("tableColumnStops")).toList().isEmpty());
+    QVERIFY(table.value(QStringLiteral("tableRowStops")).toList().isEmpty());
+    QVERIFY(!pageText(saved).contains(QStringLiteral("Column")));
+    QCOMPARE(inspectShapePaths(saved).count, 2); // The grid and retained cell's underline only.
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(!reopened.removeSelectedTableRow().isEmpty());
+    QVERIFY(!reopened.removeSelectedTableColumn().isEmpty());
+    QVERIFY(!reopened.hasDrafts());
+    QVERIFY(!reopened.canUndo());
+    reopened.deleteSelectedObject();
+    QVERIFY(reopened.save());
+    QCOMPARE(topLevelPageObjectCount(saved), 0);
+}
+
+void PDFEditControllerTest::rejectsInvalidTableTrackRemoval()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("remove-track-invalid.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    QVERIFY(!controller.removeSelectedTableRow().isEmpty());
+    QVERIFY(!controller.removeSelectedTableColumn().isEmpty());
+    controller.setShapeType(PDFEditController::RectangleShape);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.4, .4)).isEmpty());
+    QVERIFY(!controller.removeSelectedTableRow().isEmpty());
+    QVERIFY(!controller.removeSelectedTableColumn().isEmpty());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(1);
+    controller.setTableColumns(1);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.4, .4)).isEmpty());
+    const auto before = controller.selectedDraftPreview();
+    QVERIFY(!controller.removeSelectedTableRow().isEmpty());
+    QVERIFY(!controller.removeSelectedTableColumn().isEmpty());
+    QCOMPARE(controller.selectedDraftPreview(), before);
+    controller.undo(); // Rejections leave only table creation in history.
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+}
+
+void PDFEditControllerTest::changesTableTracksInBatches_data()
+{
+    QTest::addColumn<bool>("column");
+    QTest::newRow("rows") << false;
+    QTest::newRow("columns") << true;
+}
+
+void PDFEditControllerTest::changesTableTracksInBatches()
+{
+    using namespace PDFTableCellFormat;
+    QFETCH(bool, column);
+    const QString suffix = QString::fromLatin1(QTest::currentDataTag());
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("batch-tracks-%1.pdf").arg(suffix));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("batch-tracks-saved-%1.pdf").arg(suffix));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    controller.setTableRows(3);
+    controller.setTableColumns(3);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.48, .48)).isEmpty());
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedTableDivider(false, 0, .25);
+    controller.updateSelectedTableDivider(false, 1, .65);
+    controller.updateSelectedTableDivider(true, 0, .3);
+    controller.updateSelectedTableDivider(true, 1, .7);
+    controller.finishSelectedFrameResize();
+    for (int index = 0; index < 9; ++index) {
+        const QString text = QStringLiteral("%1x").arg(index);
+        const Style style{testFontFamily(), index % 2 != 0, index % 3 == 0, true, qreal(12 + index)};
+        Cell format{style, {{0, 1, style}, {1, 1, {style.family, !style.bold, style.italic, false, style.fontSize}}}};
+        format.rotation = (index % 4) * 90;
+        QVERIFY(controller.setSelectedTableCellContent(index / 3, index % 3, text, toVariant(format)).isEmpty());
+    }
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    auto table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    const auto original = controller.selectedDraftPreview();
+    const QString insertError = column ? controller.insertSelectedTableColumns(1, 2)
+                                       : controller.insertSelectedTableRows(1, 2);
+    QVERIFY2(insertError.isEmpty(), qPrintable(insertError));
+    const auto inserted = controller.selectedDraftPreview();
+    const int rows = column ? 3 : 5;
+    const int columns = column ? 5 : 3;
+    QCOMPARE(inserted.value(QStringLiteral("tableRows")).toInt(), rows);
+    QCOMPARE(inserted.value(QStringLiteral("tableColumns")).toInt(), columns);
+    const auto originalTexts = original.value(QStringLiteral("tableCellTexts")).toStringList();
+    const auto originalFormats = original.value(QStringLiteral("tableCellFormats")).toList();
+    const auto originalRects = original.value(QStringLiteral("tableCellRects")).toList();
+    const auto texts = inserted.value(QStringLiteral("tableCellTexts")).toStringList();
+    const auto formats = inserted.value(QStringLiteral("tableCellFormats")).toList();
+    const auto rects = inserted.value(QStringLiteral("tableCellRects")).toList();
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < columns; ++col) {
+            const int track = column ? col : row;
+            const bool blank = track == 1 || track == 2;
+            const int sourceTrack = blank ? 1 : track >= 3 ? track - 2 : track;
+            const int oldIndex = (column ? row : sourceTrack) * 3 + (column ? sourceTrack : col);
+            const int index = row * columns + col;
+            QCOMPARE(texts.at(index), blank ? QString() : originalTexts.at(oldIndex));
+            QVariantMap expected = originalFormats.at(oldIndex).toMap();
+            if (blank)
+                expected.insert(QStringLiteral("spans"), QVariantList{});
+            QCOMPARE(formats.at(index).toMap(), expected);
+            const auto size = rects.at(index).toRectF().size();
+            const auto oldSize = originalRects.at(oldIndex).toRectF().size();
+            QVERIFY(qAbs(size.width() - oldSize.width()) < .000001);
+            QVERIFY(qAbs(size.height() - oldSize.height()) < .000001);
+        }
+    }
+    controller.undo(); // Both inserted tracks are one history action.
+    QCOMPARE(controller.selectedDraftPreview(), original);
+    QVERIFY(!controller.hasDrafts());
+    controller.redo();
+    QCOMPARE(controller.selectedDraftPreview(), inserted);
+    QVERIFY(controller.save());
+
+    PDFDocument reopenedDocument;
+    PDFEditController reopened;
+    QVERIFY(reopenedDocument.open(QUrl::fromLocalFile(saved)));
+    reopened.setDocument(&reopenedDocument);
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableCellTexts")), inserted.value(QStringLiteral("tableCellTexts")));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")), inserted.value(QStringLiteral("tableCellFormats")));
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    const auto beforeRemoval = reopened.selectedDraftPreview();
+    const QString removeError = column ? reopened.removeSelectedTableColumns(QStringLiteral(" 5, 2, 2 "))
+                                       : reopened.removeSelectedTableRows(QStringLiteral(" 5, 2, 2 "));
+    QVERIFY2(removeError.isEmpty(), qPrintable(removeError));
+    const auto removed = reopened.selectedDraftPreview();
+    QCOMPARE(removed.value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(removed.value(QStringLiteral("tableColumns")).toInt(), 3);
+    const QVector<int> keptTracks{0, 2, 3}; // Original indices, sorted and deduplicated before removal.
+    const auto keptTexts = removed.value(QStringLiteral("tableCellTexts")).toStringList();
+    const auto keptFormats = removed.value(QStringLiteral("tableCellFormats")).toList();
+    const auto keptRects = removed.value(QStringLiteral("tableCellRects")).toList();
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            const int oldIndex = (column ? row : keptTracks.at(row)) * columns + (column ? keptTracks.at(col) : col);
+            const int index = row * 3 + col;
+            QCOMPARE(keptTexts.at(index), texts.at(oldIndex));
+            QCOMPARE(keptFormats.at(index), formats.at(oldIndex));
+            const auto size = keptRects.at(index).toRectF().size();
+            const auto oldSize = rects.at(oldIndex).toRectF().size();
+            QVERIFY(qAbs(size.width() - oldSize.width()) < .000001);
+            QVERIFY(qAbs(size.height() - oldSize.height()) < .000001);
+        }
+    }
+    reopened.undo();
+    QCOMPARE(reopened.selectedDraftPreview(), beforeRemoval);
+    QVERIFY(!reopened.hasDrafts());
+    reopened.redo();
+    QCOMPARE(reopened.selectedDraftPreview(), removed);
+    QVERIFY(reopened.save());
+    table = candidateForKind(waitForCandidates(reopened, 0), QStringLiteral("sourceShape"));
+    QCOMPARE(table.value(QStringLiteral("tableCellTexts")), removed.value(QStringLiteral("tableCellTexts")));
+    QCOMPARE(table.value(QStringLiteral("tableCellFormats")), removed.value(QStringLiteral("tableCellFormats")));
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), 3);
+    QVERIFY(reopened.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    reopened.deleteSelectedObject();
+    QVERIFY(reopened.save());
+    QCOMPARE(topLevelPageObjectCount(saved), 0); // No children remain from either batch operation.
+}
+
+void PDFEditControllerTest::rejectsInvalidTableTrackBatches()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("batch-tracks-invalid.pdf"));
+    QVERIFY(createTableTestPage(path, 0));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(PDFEditController::TableShape);
+    QVERIFY(!controller.addShape(0, QPointF(.1, .1), QPointF(.5, .5)).isEmpty());
+    const auto before = controller.selectedDraftPreview();
+    for (int count : {-1, 0, 18, 1000000}) {
+        QVERIFY(!controller.insertSelectedTableRows(1, count).isEmpty());
+        QVERIFY(!controller.insertSelectedTableColumns(1, count).isEmpty());
+        QCOMPARE(controller.selectedDraftPreview(), before);
+    }
+    for (int index : {-1, 4}) {
+        QVERIFY(!controller.insertSelectedTableRows(index, 2).isEmpty());
+        QVERIFY(!controller.insertSelectedTableColumns(index, 2).isEmpty());
+        QCOMPARE(controller.selectedDraftPreview(), before);
+    }
+    for (const auto &indices : {QString(), QStringLiteral(" "), QStringLiteral("1,,2"), QStringLiteral("1,"),
+            QStringLiteral("0"), QStringLiteral("-1"), QStringLiteral("4"), QStringLiteral("1.5"),
+            QStringLiteral("1-2"), QStringLiteral("x"), QStringLiteral("1,2,3"), QStringLiteral("3,2,1,1")}) {
+        QVERIFY2(!controller.removeSelectedTableRows(indices).isEmpty(), qPrintable(indices));
+        QVERIFY2(!controller.removeSelectedTableColumns(indices).isEmpty(), qPrintable(indices));
+        QCOMPARE(controller.selectedDraftPreview(), before);
+    }
+    controller.undo(); // All rejections leave only creation on the history stack.
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(!controller.canUndo());
+    QVERIFY(!controller.addShape(0, QPointF(.6, .6), QPointF(.95, .95)).isEmpty());
+    const auto nearEdge = controller.selectedDraftPreview();
+    QVERIFY(!controller.insertSelectedTableRows(0, 2).isEmpty());
+    QVERIFY(!controller.insertSelectedTableColumns(0, 2).isEmpty());
+    QCOMPARE(controller.selectedDraftPreview(), nearEdge);
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+}
+
+void PDFEditControllerTest::insertsImportedTableFrameTracks()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("insert-imported-frame.pdf"));
+    const QString saved = m_temporaryDirectory.filePath(QStringLiteral("insert-imported-frame-saved.pdf"));
+    QVERIFY(createImportedTableFrame(path, false, 0));
+    const auto originalText = importedFrameTextSnapshot(path);
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    auto table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(table.value(QStringLiteral("tableFrameOnly")).toBool());
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    controller.beginSelectedFrameResize();
+    controller.updateSelectedFrameRect(QRectF(.1, .1, .4, .4));
+    controller.finishSelectedFrameResize();
+    QVERIFY(controller.insertSelectedTableRow(1).isEmpty());
+    QVERIFY(controller.insertSelectedTableColumn(0).isEmpty());
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 4);
+    QVERIFY(controller.selectedDraftPreview().value(QStringLiteral("tableCellTexts")).toStringList().isEmpty());
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    QCOMPARE(importedFrameTextSnapshot(saved), originalText);
+    QCOMPARE(inspectShapePaths(saved).count, 1);
+    table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(table.value(QStringLiteral("tableFrameOnly")).toBool());
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), 3);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), 4);
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    QVERIFY(controller.insertSelectedTableColumn(4).isEmpty());
+    QVERIFY(controller.save());
+    QCOMPARE(importedFrameTextSnapshot(saved), originalText);
+    table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(0, table.value(QStringLiteral("objectId")).toString()));
+    for (int row = 3; row > 1; --row)
+        QVERIFY(controller.removeSelectedTableRow().isEmpty());
+    for (int column = 5; column > 1; --column)
+        QVERIFY(controller.removeSelectedTableColumn().isEmpty());
+    QVERIFY(controller.save());
+    QCOMPARE(importedFrameTextSnapshot(saved), originalText);
+    table = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("sourceShape"));
+    QVERIFY(table.value(QStringLiteral("tableFrameOnly")).toBool());
+    QCOMPARE(table.value(QStringLiteral("tableRows")).toInt(), 1);
+    QCOMPARE(table.value(QStringLiteral("tableColumns")).toInt(), 1);
+    QCOMPARE(inspectShapePaths(saved).count, 1);
+}
+
 void PDFEditControllerTest::editsTableDividersWithAtomicHistory()
 {
     const QString path = m_temporaryDirectory.filePath(QStringLiteral("table-divider-history.pdf"));
@@ -3132,6 +3772,16 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
         return findItem(findItem, window->contentItem(), name);
     };
     const auto clickItem = [&](QQuickItem *item) {
+        // Property panels scroll on shorter windows; reveal the real control before clicking.
+        for (auto *parent = item->parentItem(); parent; parent = parent->parentItem()) {
+            if (!parent->property("contentY").isValid())
+                continue;
+            const QRectF rect = item->mapRectToItem(parent, QRectF(0, 0, item->width(), item->height()));
+            const qreal delta = rect.top() < 8 ? rect.top() - 8
+                : rect.bottom() > parent->height() - 8 ? rect.bottom() - parent->height() + 8 : 0;
+            const qreal maximum = qMax<qreal>(0, parent->property("contentHeight").toReal() - parent->height());
+            parent->setProperty("contentY", qBound<qreal>(0, parent->property("contentY").toReal() + delta, maximum));
+        }
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
                           item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
     };
@@ -3268,6 +3918,150 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QCOMPARE(controller.selectedFrameRect(), tableFrame);
     controller.undo();
     QVERIFY(!controller.hasDrafts());
+    // Structure buttons open a lazy popup; changes happen only after Apply.
+    QVERIFY(!itemNamed(QStringLiteral("tableRowReferenceBox")));
+    QVERIFY(!itemNamed(QStringLiteral("tableColumnReferenceBox")));
+    const auto structurePopupVisible = [&] {
+        auto *apply = itemNamed(QStringLiteral("tableStructureApplyButton"));
+        return apply && apply->isVisible();
+    };
+    const auto applyTableStructure = [&] {
+        clickItem(itemNamed(QStringLiteral("tableStructureApplyButton")));
+    };
+    QVERIFY(!structurePopupVisible());
+    QQuickItem *appendRow = nullptr;
+    QTRY_VERIFY((appendRow = itemNamed(QStringLiteral("tableAppendRowButton"))) && appendRow->isEnabled());
+    clickItem(appendRow);
+    QTRY_VERIFY(structurePopupVisible());
+    QCOMPARE(itemNamed(QStringLiteral("tableStructureCountBox"))->property("value").toInt(), 1);
+    QCOMPARE(itemNamed(QStringLiteral("tableStructurePositionBox"))->property("value").toInt(), 4);
+    QVERIFY(!controller.hasDrafts());
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableRows")).toInt(), 4);
+    QVERIFY(controller.selectedFrameRect().height() > tableFrame.height());
+    QCOMPARE(controller.selectedFrameRect().width(), tableFrame.width());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QQuickItem *appendColumn = nullptr;
+    QTRY_VERIFY((appendColumn = itemNamed(QStringLiteral("tableAppendColumnButton"))) && appendColumn->isEnabled());
+    clickItem(appendColumn);
+    QTRY_VERIFY(structurePopupVisible());
+    QCOMPARE(itemNamed(QStringLiteral("tableStructurePositionBox"))->property("value").toInt(), 5);
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 5);
+    QCOMPARE(controller.selectedFrameRect().height(), tableFrame.height());
+    QVERIFY(controller.selectedFrameRect().width() > tableFrame.width());
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+
+    clickItem(appendRow);
+    QTRY_VERIFY(structurePopupVisible());
+    auto *structureCount = itemNamed(QStringLiteral("tableStructureCountBox"));
+    auto *structurePosition = itemNamed(QStringLiteral("tableStructurePositionBox"));
+    QVERIFY(structureCount && structurePosition);
+    QVERIFY(structureCount->setProperty("value", 2));
+    QVERIFY(structurePosition->setProperty("value", 2));
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-insert-tracks.png")));
+    }
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableRows")).toInt(), 5);
+    const auto insertedRows = controller.selectedDraftPreview().value(QStringLiteral("tableRowStops")).toList();
+    QCOMPARE(insertedRows.size(), 4);
+    QVERIFY(qAbs(insertedRows.at(0).toReal() - .2) < .000001);
+    controller.undo(); // Two rows inserted together are one action.
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), tableFrame);
+
+    clickItem(appendColumn);
+    QTRY_VERIFY(structurePopupVisible());
+    clickItem(itemNamed(QStringLiteral("tableStructureCancelButton")));
+    QTRY_VERIFY(!structurePopupVisible());
+    QVERIFY(!controller.hasDrafts());
+    QQuickItem *removeColumn = nullptr;
+    QTRY_VERIFY((removeColumn = itemNamed(QStringLiteral("tableRemoveColumnButton"))) && removeColumn->isEnabled());
+    clickItem(removeColumn);
+    QTRY_VERIFY(structurePopupVisible());
+    auto *structureIndices = itemNamed(QStringLiteral("tableStructureIndicesInput"));
+    QVERIFY(structureIndices);
+    QCOMPARE(structureIndices->property("text").toString(), QStringLiteral("4"));
+    QVERIFY(structureIndices->setProperty("text", QStringLiteral("1,,3")));
+    applyTableStructure();
+    QTRY_VERIFY(structurePopupVisible());
+    QVERIFY(!controller.hasDrafts());
+    auto *structureError = itemNamed(QStringLiteral("tableStructureError"));
+    QVERIFY(structureError && structureError->isVisible() && !structureError->property("text").toString().isEmpty());
+    if (!screenshotPrefix.isEmpty()) {
+        QTest::qWait(100);
+        QVERIFY(window->grabWindow().save(screenshotPrefix + QStringLiteral("-remove-tracks.png")));
+    }
+    QVERIFY(structureIndices->setProperty("text", QStringLiteral("1,2,3,4")));
+    applyTableStructure();
+    QTRY_VERIFY(structurePopupVisible());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(structureIndices->setProperty("text", QStringLiteral(" 3, 1, 3 ")));
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 2);
+    controller.undo(); // Nonadjacent duplicate indices still produce one action.
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), tableFrame);
+
+    // Closing or replacing the selection/history invalidates popup input.
+    clickItem(appendRow);
+    QTRY_VERIFY(structurePopupVisible());
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QVERIFY(controller.hasDrafts());
+    clickItem(removeColumn);
+    QTRY_VERIFY(structurePopupVisible());
+    controller.undo();
+    QTRY_VERIFY(!structurePopupVisible());
+    QVERIFY(!controller.hasDrafts());
+    clickItem(appendRow);
+    QTRY_VERIFY(structurePopupVisible());
+    controller.clearSelection();
+    QTRY_VERIFY(!structurePopupVisible());
+    QVERIFY(!controller.hasDrafts());
+    QVERIFY(controller.selectCandidate(0, source.value(QStringLiteral("objectId")).toString()));
+
+    QQuickItem *removeRow = nullptr;
+    QTRY_VERIFY((removeRow = itemNamed(QStringLiteral("tableRemoveRowButton"))) && removeRow->isEnabled());
+    QTRY_VERIFY((removeColumn = itemNamed(QStringLiteral("tableRemoveColumnButton"))) && removeColumn->isEnabled());
+    clickItem(removeRow);
+    QTRY_VERIFY(structurePopupVisible());
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableRows")).toInt(), 2);
+    QVERIFY(controller.selectedFrameRect().height() < tableFrame.height());
+    clickItem(removeColumn);
+    QTRY_VERIFY(structurePopupVisible());
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), 3);
+    QVERIFY(controller.selectedFrameRect().width() < tableFrame.width());
+    clickItem(removeRow);
+    QTRY_VERIFY(structurePopupVisible());
+    applyTableStructure();
+    QTRY_VERIFY(!structurePopupVisible());
+    QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableRows")).toInt(), 1);
+    QVERIFY(!removeRow->isEnabled());
+    for (int count : {2, 1}) {
+        clickItem(removeColumn);
+        QTRY_VERIFY(structurePopupVisible());
+        applyTableStructure();
+        QTRY_VERIFY(!structurePopupVisible());
+        QTRY_COMPARE(controller.selectedDraftPreview().value(QStringLiteral("tableColumns")).toInt(), count);
+    }
+    QVERIFY(!removeColumn->isEnabled());
+    for (int index = 0; index < 5; ++index)
+        controller.undo();
+    QVERIFY(!controller.hasDrafts());
+    QCOMPARE(controller.selectedFrameRect(), tableFrame);
     const QPoint cellPoint = overlay->mapToScene(QPointF(
         (tableFrame.left() + tableFrame.width() / 8) * overlay->width(),
         (tableFrame.top() + tableFrame.height() / 6) * overlay->height())).toPoint();
@@ -3303,6 +4097,11 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     auto *cellFontBox = itemNamed(QStringLiteral("tableCellFontBox"));
     QVERIFY(cellFontBox && cellPanel()->isAncestorOf(cellFontBox));
     QVERIFY(itemNamed(QStringLiteral("tableCellFontSizeBox")));
+    // The cell panel only formats content; structure actions belong to the table panel.
+    QVERIFY(!itemNamed(QStringLiteral("tableCellAppendRowButton")));
+    QVERIFY(!itemNamed(QStringLiteral("tableCellAppendColumnButton")));
+    QVERIFY(!itemNamed(QStringLiteral("tableCellRemoveRowButton")));
+    QVERIFY(!itemNamed(QStringLiteral("tableCellRemoveColumnButton")));
     const auto enterSizeText = [&](const QString &text) {
         auto *sizeInput = itemNamed(QStringLiteral("tableCellFontSizeInput"));
         if (!sizeInput || !sizeInput->isEnabled())
@@ -3398,6 +4197,10 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
     QTRY_VERIFY(!revealCellButton->isVisible());
     QVERIFY(itemNamed(QStringLiteral("tableCellFontBox"))->isEnabled());
+    QVERIFY(!itemNamed(QStringLiteral("tableCellAppendRowButton")));
+    QVERIFY(!itemNamed(QStringLiteral("tableCellAppendColumnButton")));
+    QVERIFY(!itemNamed(QStringLiteral("tableCellRemoveRowButton")));
+    QVERIFY(!itemNamed(QStringLiteral("tableCellRemoveColumnButton")));
     QCOMPARE(cellInput->property("text").toString(), cellText);
     QTRY_VERIFY(cellInput->hasActiveFocus());
     if (!screenshotPrefix.isEmpty()) {
@@ -3659,6 +4462,36 @@ void PDFEditControllerTest::drawsTableThroughRibbonAndOverlay()
     QTRY_VERIFY(cellInput->hasActiveFocus());
     QTest::keyClick(window, Qt::Key_Escape);
     QTRY_VERIFY(!cellInputVisible());
+    QVERIFY(!controller.hasDrafts());
+
+    // Invalid font size stays editable; Apply commits a corrected size and rotation together.
+    QTest::mouseDClick(window, Qt::LeftButton, Qt::NoModifier, cellPoint);
+    QTRY_VERIFY((cellInput = itemNamed(QStringLiteral("tableCellTextInput"))) && cellInput->isVisible());
+    QVERIFY(cellInput->setProperty("text", QStringLiteral("Hi")));
+    QVERIFY(QMetaObject::invokeMethod(cellInput, "select", Q_ARG(int, 0), Q_ARG(int, 2)));
+    rotationBox = itemNamed(QStringLiteral("tableCellRotationBox"));
+    QVERIFY(rotationBox->setProperty("currentIndex", 1));
+    QVERIFY(QMetaObject::invokeMethod(rotationBox, "activated", Q_ARG(int, 1)));
+    QTRY_COMPARE(inlineFormat().rotation, 90);
+    QVERIFY(enterSizeText(QStringLiteral("0")));
+    cellApplyButton = itemNamed(QStringLiteral("tableCellApplyButton"));
+    QVERIFY(cellApplyButton && cellApplyButton->isEnabled());
+    clickItem(cellApplyButton);
+    QTRY_VERIFY(cellInputVisible());
+    QCOMPARE(cellInput->property("text").toString(), QStringLiteral("Hi"));
+    QVERIFY(!controller.hasDrafts());
+    QTRY_VERIFY((cellError = itemNamed(QStringLiteral("tableCellError")))
+        && cellError->isVisible() && !cellError->property("text").toString().isEmpty());
+    QVERIFY(enterSizeText(QStringLiteral("20")));
+    clickItem(cellApplyButton); // The size field still owns focus when Apply begins.
+    QTRY_VERIFY(!cellInputVisible());
+    QCOMPARE(currentCellTexts().at(0), QStringLiteral("Hi"));
+    PDFTableCellFormat::Cell committedFormat;
+    QVERIFY(PDFTableCellFormat::fromVariant(controller.selectedDraftPreview()
+        .value(QStringLiteral("tableCellFormats")).toList().at(0).toMap(), QStringLiteral("Hi"), committedFormat));
+    QCOMPARE(committedFormat.rotation, 90);
+    QCOMPARE(PDFTableCellFormat::styleAt(committedFormat, 0).fontSize, 20);
+    controller.undo();
     QVERIFY(!controller.hasDrafts());
 
     // Applying the cell restores shape properties; their edits keep a separate undo step.

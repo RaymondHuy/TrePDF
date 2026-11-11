@@ -5572,6 +5572,102 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <source>The cell formatting is invalid or too complex. Use fewer font or style changes.</source>
         <translation>The cell formatting is invalid or too complex. Use fewer font or style changes.</translation>
     </message>
+    <message id="TableStructureQuantity">
+        <source>Quantity</source>
+        <translation>Quantity</translation>
+    </message>
+    <message id="TableStructureRowPosition">
+        <source>Insert at row</source>
+        <translation>Insert at row</translation>
+    </message>
+    <message id="TableStructureColumnPosition">
+        <source>Insert at column</source>
+        <translation>Insert at column</translation>
+    </message>
+    <message id="TableStructurePositionHint">
+        <source>New rows or columns are inserted before this position. Choose %1 to add at the end.</source>
+        <translation>New rows or columns are inserted before this position. Choose %1 to add at the end.</translation>
+    </message>
+    <message id="TableStructureRowIndices">
+        <source>Rows to delete</source>
+        <translation>Rows to delete</translation>
+    </message>
+    <message id="TableStructureColumnIndices">
+        <source>Columns to delete</source>
+        <translation>Columns to delete</translation>
+    </message>
+    <message id="TableStructureIndicesHint">
+        <source>Enter row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>Enter row or column numbers separated by commas, for example 1,3,5.</translation>
+    </message>
+    <message id="TableStructureIndicesPlaceholder">
+        <source>Example: 1,3,5</source>
+        <translation>Example: 1,3,5</translation>
+    </message>
+    <message id="TableStructureApply">
+        <source>Apply</source>
+        <translation>Apply</translation>
+    </message>
+    <message id="TableStructureInvalidNumbers">
+        <source>Enter a valid quantity and insertion position.</source>
+        <translation>Enter a valid quantity and insertion position.</translation>
+    </message>
+    <message id="TableInsertInvalidCount">
+        <source>Enter a whole-number quantity from 1 to 20.</source>
+        <translation>Enter a whole-number quantity from 1 to 20.</translation>
+    </message>
+    <message id="TableRemoveInvalidIndices">
+        <source>Enter valid row or column numbers separated by commas, for example 1,3,5.</source>
+        <translation>Enter valid row or column numbers separated by commas, for example 1,3,5.</translation>
+    </message>
+    <message id="TableStructure">
+        <source>Table rows and columns</source>
+        <translation>Table rows and columns</translation>
+    </message>
+    <message id="TableRemoveRow">
+        <source>Delete row</source>
+        <translation>Delete row</translation>
+    </message>
+    <message id="TableRemoveColumn">
+        <source>Delete column</source>
+        <translation>Delete column</translation>
+    </message>
+    <message id="TableRemoveHint">
+        <source>Deletes the specified rows or columns, including their cell content.</source>
+        <translation>Deletes the specified rows or columns, including their cell content.</translation>
+    </message>
+    <message id="TableRemoveMinimumDimension">
+        <source>Keep at least one row and one column. To remove the whole table, select it and press Delete.</source>
+        <translation>Keep at least one row and one column. To remove the whole table, select it and press Delete.</translation>
+    </message>
+    <message id="TableRemoveTooSmall">
+        <source>The remaining table would be too small. Enlarge its rows or columns first.</source>
+        <translation>The remaining table would be too small. Enlarge its rows or columns first.</translation>
+    </message>
+    <message id="TableInsertRow">
+        <source>Add row</source>
+        <translation>Add row</translation>
+    </message>
+    <message id="TableInsertColumn">
+        <source>Add column</source>
+        <translation>Add column</translation>
+    </message>
+    <message id="TableInsertSizeHint">
+        <source>Existing cell sizes stay the same. The table expands down or to the right.</source>
+        <translation>Existing cell sizes stay the same. The table expands down or to the right.</translation>
+    </message>
+    <message id="TableInsertDimensionLimit">
+        <source>A table supports at most 20 rows and 20 columns.</source>
+        <translation>A table supports at most 20 rows and 20 columns.</translation>
+    </message>
+    <message id="TableInsertOutsidePage">
+        <source>There is not enough space on this page to add a row or column. Move or resize the table first.</source>
+        <translation>There is not enough space on this page to add a row or column. Move or resize the table first.</translation>
+    </message>
+    <message id="TableCellInvalidFontSize">
+        <source>Enter a whole-number font size from 1 to 512 pt.</source>
+        <translation>Enter a whole-number font size from 1 to 512 pt.</translation>
+    </message>
     <message id="TableCellRotation">
         <source>Cell text rotation</source>
         <translation>Cell text rotation</translation>
