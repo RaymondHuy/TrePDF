@@ -1797,6 +1797,17 @@ ASCII và coverage tiếng Việt nếu nguồn công bố hỗ trợ.
 7. Mở lại file đã lưu bằng `PDFDocument::open()`. Các signal đổi document/revision
    reset draft và undo/redo chỉ sau khi reopen thành công.
 
+Khi thay đối tượng nguồn, writer kiểm tra riêng các path nền trước khi tái tạo
+content. Những fill màu đặc, không trong suốt và khớp với bản render được ghi
+màu tường minh bằng `FPDFPageObj_SetFillColor()`. Fill có màu khác xám còn phải
+có pixel gần đục khớp màu fill trong bản render riêng; thiếu bằng chứng này thì
+giữ nguyên đối tượng. Bước này giữ nền ở dạng vector, kể cả fill dùng ICCBased
+grayscale/RGB, CMYK hoặc kế thừa qua nhiều content stream; nếu bỏ qua, PDFium
+có thể làm mất toán tử màu và khiến nền bảng thành đen sau Save. Màu được lưu
+thành DeviceRGB theo màu hiển thị hiệu dụng, không bảo toàn ICC profile hoặc
+các kênh màu CMYK cho in ấn. Độ trong suốt, pattern/shading và managed shape
+vẫn giữ các kiểm tra riêng hiện có.
+
 Trên Windows, `PDFiumDocument` mở reader với `FILE_SHARE_DELETE`, còn
 `PDFAtomicSaveFile` giữ staging/check lỗi của `QSaveFile` và dùng atomic rename
 `FileRenameInfoEx` với POSIX semantics để thay file vẫn còn reader. Reader cũ

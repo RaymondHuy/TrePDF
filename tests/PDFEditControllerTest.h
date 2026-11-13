@@ -387,7 +387,10 @@ private slots:
     void savesEditedTextRoundTrip();
     void preservesPatternFilledGraphicsWhenSavingText();
     void preservesPatternStrokedGraphicsWhenSavingText();
-    void preservesGrayscaleWhiteFillWhenSavingText();
+    void preservesGrayscaleFillWhenSavingText_data();
+    void preservesGrayscaleFillWhenSavingText();
+    void preservesColoredFillWhenSavingText_data();
+    void preservesColoredFillWhenSavingText();
     void preservesIccBasedTextColorWhenEditingSibling();
     void preservesIccBasedTextColorWhenAddingText();
     void savesVietnameseEditWithEmbeddedArial_data();

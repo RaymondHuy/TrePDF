@@ -2791,8 +2791,9 @@ bool renderedPaintDiffersFromSerializableColors(FPDF_PAGEOBJECT object,
         || unexpectedPixels >= qMax(8, opaquePixels / 200);
 }
 
-bool materializeWhitePathFill(FPDF_PAGEOBJECT inspectionObject,
-                              FPDF_PAGEOBJECT sourceObject)
+bool materializeOpaqueSolidPathFill(FPDF_PAGEOBJECT inspectionObject,
+                                    FPDF_PAGEOBJECT sourceObject,
+                                    const QImage &renderedObject)
 {
     int fillMode = FPDF_FILLMODE_NONE;
     FPDF_BOOL strokes = false;
@@ -2815,14 +2816,35 @@ bool materializeWhitePathFill(FPDF_PAGEOBJECT inspectionObject,
             &alpha)) {
         return false;
     }
-    if (red != 255 || green != 255 || blue != 255 || alpha != 255) {
+    if (alpha != 255) {
         return true;
     }
 
-    // Word-authored PDFs can expose a white DeviceGray path correctly while
-    // loaded, then let PDFium serialize that implicit paint as RGB black after
-    // nearby source objects are replaced. Marking only exact opaque-white
-    // fills explicitly avoids changing CMYK/ICC/spot paints with real color.
+    if (red != green || green != blue) {
+        // A passing render check can also mean there were no opaque pixels.
+        // Require visible fill evidence before normalizing chromatic paint;
+        // clipped/soft-masked objects may only expose their stroke or nothing.
+        const QColor fillColor(static_cast<int>(red), static_cast<int>(green),
+                               static_cast<int>(blue));
+        bool visibleFill = false;
+        for (int y = 0; y < renderedObject.height() && !visibleFill; ++y) {
+            const auto *line = reinterpret_cast<const QRgb *>(renderedObject.constScanLine(y));
+            for (int x = 0; x < renderedObject.width(); ++x) {
+                const QColor color = QColor::fromRgba(line[x]);
+                if (color.alpha() >= 240 && colorsApproximatelyEqual(color, fillColor)) {
+                    visibleFill = true;
+                    break;
+                }
+            }
+        }
+        if (!visibleFill)
+            return true;
+    }
+
+    // PDFium can render ICC/CMYK fills correctly, then omit their color when
+    // regenerating nearby edited content. Materialize the effective RGB after
+    // the render check, keeping the vector path and its visible appearance.
+    // This does not preserve the original ICC/CMYK printing color space.
     return FPDFPageObj_SetFillColor(
         sourceObject,
         red,
@@ -3085,9 +3107,10 @@ PDFSaveWriter::Result prepareUnsupportedPaints(
             continue;
         }
         if (objectType == FPDF_PAGEOBJ_PATH
-            && !materializeWhitePathFill(
+            && !materializeOpaqueSolidPathFill(
                 inspectionObject,
-                sourceObject)) {
+                sourceObject,
+                renderedObject)) {
             return failure(
                 PDFSaveWriter::Error::PageContentGenerationFailed,
                 pageIndex);
@@ -5974,7 +5997,7 @@ PDFSaveWriter::Result applyPageDrafts(FPDF_DOCUMENT document,
     }
     if (modifiesExistingObject) {
         // PDFium's content generator cannot serialize pattern and shading
-        // paints reliably, and can lose implicit opaque-white path fills while
+        // paints reliably, and can lose implicit opaque solid fills while
         // replacing nearby source objects. Preserve those paints before the
         // source content stream is regenerated.
         const PDFSaveWriter::Result paintResult = prepareUnsupportedPaints(

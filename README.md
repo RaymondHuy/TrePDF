@@ -532,13 +532,21 @@ is the initial, statically linked backend bundled under `third_party/`.
 
 ## Build
 
-For manual Windows, macOS Apple Silicon and Linux packages from GitHub Actions,
-see [the UAT workflow guide](docs/github-uat.md). The `uat` workflow assigns
-versions `0.0.1`, `0.0.2`, and so on to new manual runs.
+For a local macOS Release build, follow
+[the local Release guide](docs/macos-release-local.md). It includes the current
+Apple Silicon toolchain commands, the output `.app` path and rebuild steps.
+For a drag-to-install disk image, follow
+[Create a local DMG](docs/macos-release-local.md#create-a-local-dmg).
+
+For manual Windows, macOS and Linux packages from GitHub Actions, see
+[the UAT workflow guide](docs/github-uat.md). Run `uat` for Windows, Apple Silicon
+and Linux, or `uat-macos-intel` for the two Intel Mac packages. Each workflow has
+its own version sequence: `0.0.1`, `0.0.2`, and so on for new manual runs.
 
 The configured Qt 6.12.0 macOS build requires macOS 14.4 or newer. UAT also
-provides `macos-arm64-qt6.11`, built with Qt 6.11.0 for macOS 13 or newer.
-Both macOS packages are for Apple Silicon (M1 or newer).
+provides `macos-arm64-qt6.11` and `macos-x64-qt6.11`, built with Qt 6.11.0 for
+macOS 13 or newer. Choose `macos-arm64` packages for Apple Silicon (M1 or newer)
+or `macos-x64` packages for Intel Macs.
 
 Install Qt 6.8 or newer and provide a PDFium build that contains `fpdfview.h`
 and the `pdfium` library. Like PDFium, qpdf 12.4.1 is bundled as a prebuilt macOS
@@ -603,6 +611,11 @@ text: qsTrId("OpenPdf")
 Vietnamese is the current default UI language. Its source catalog is
 `i18n/qml_vi.ts`; CMake compiles it to `qml_vi.qm` and embeds it next to the
 main QML file under `:/qt/qml/TrePDF/src/i18n`.
+
+To build with an existing UI translation (`vi`, `en`, `hr` or `th`), see
+[the local Release language instructions](docs/macos-release-local.md#build-with-another-ui-language).
+The desktop entry point currently selects the locale in `src/main.cpp`;
+there is no build-time language option yet.
 
 After adding or changing a user-visible string, update the catalog and rebuild:
 
