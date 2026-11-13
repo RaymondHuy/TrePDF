@@ -262,18 +262,34 @@ bool createPatternStrokePdf(const QString &filePath)
     return createPatternPaintPdf(filePath, PatternPaintMode::Stroke);
 }
 
-bool createGrayscaleWhiteFillPdf(const QString &filePath)
+bool createGrayscaleFillPdf(const QString &filePath,
+                            qreal gray,
+                            bool namedColorSpace,
+                            bool splitContents,
+                            bool iccBased)
 {
+    const QByteArray iccProfile = iccBased
+        ? QColorSpace(QPointF(0.3127, 0.3290), QColorSpace::TransferFunction::SRgb)
+              .iccProfile()
+        : QByteArray();
+    if (iccBased && (!namedColorSpace || iccProfile.isEmpty()))
+        return false;
+    const QByteArray colorSpace = iccBased
+        ? QByteArray("[/ICCBased ") + QByteArray::number(splitContents ? 7 : 6)
+              + QByteArray(" 0 R]")
+        : QByteArray("/DeviceGray");
+    const QByteArray paint = (namedColorSpace ? QByteArray("/CS0 cs\n") : QByteArray())
+        + QByteArray::number(gray, 'f', 3)
+        + (namedColorSpace ? QByteArray(" scn\n") : QByteArray(" g\n"));
     const QByteArray pageContent(
         "/P <</MCID 0>> BDC\n"
-        "1 g\n"
         "20 20 160 80 re f*\n"
         "EMC\n"
         "0 g\n"
         "BT\n"
         "/F1 20 Tf\n"
         "20 160 Td\n"
-        "(Grayscale white fill) Tj\n"
+        "(Grayscale fill) Tj\n"
         "ET\n");
     const auto contentStream = [](const QByteArray &content) {
         return QByteArray("<< /Length ")
@@ -283,19 +299,87 @@ bool createGrayscaleWhiteFillPdf(const QString &filePath)
             + QByteArray("endstream");
     };
 
-    return writePdfObjects(
-        filePath,
-        {
+    QVector<QByteArray> objects{
             QByteArray("<< /Type /Catalog /Pages 2 0 R >>"),
             QByteArray("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
             QByteArray(
                 "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
-                "/Resources << /Font << /F1 4 0 R >> >> "
-                "/Contents 5 0 R >>"),
+                "/Resources << /Font << /F1 4 0 R >> "
+                "/ColorSpace << /CS0 ") + colorSpace
+                + QByteArray(" >> >> /Contents ")
+                + (splitContents ? QByteArray("[5 0 R 6 0 R]") : QByteArray("5 0 R"))
+                + QByteArray(" >>"),
             QByteArray(
                 "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
-            contentStream(pageContent),
-        });
+            contentStream(splitContents ? paint : paint + pageContent),
+    };
+    if (splitContents) {
+        // Graphics state, including the named gray color, crosses stream boundaries.
+        objects.append(contentStream(pageContent));
+    }
+    if (iccBased) {
+        objects.append(QByteArray("<< /N 1 /Alternate /DeviceGray /Length ")
+            + QByteArray::number(iccProfile.size())
+            + QByteArray(" >>\nstream\n") + iccProfile + QByteArray("\nendstream"));
+    }
+    return writePdfObjects(filePath, objects);
+}
+
+bool createColoredFillPdf(const QString &filePath,
+                          const QColor &color,
+                          SolidFillColorSpace colorSpace,
+                          bool splitContents)
+{
+    if (!color.isValid() || color.alpha() != 255)
+        return false;
+    const bool iccBased = colorSpace == SolidFillColorSpace::IccRgb;
+    const bool named = colorSpace == SolidFillColorSpace::NamedRgb || iccBased;
+    const QByteArray iccProfile = iccBased
+        ? QColorSpace(QColorSpace::SRgb).iccProfile() : QByteArray();
+    if (iccBased && iccProfile.isEmpty())
+        return false;
+    const QByteArray space = iccBased
+        ? QByteArray("[/ICCBased ") + QByteArray::number(splitContents ? 7 : 6) + " 0 R]"
+        : QByteArray("/DeviceRGB");
+    const auto number = [](qreal value) { return QByteArray::number(value, 'f', 6); };
+    QByteArray paint;
+    if (colorSpace == SolidFillColorSpace::DeviceCmyk) {
+        const QColor cmyk = color.toCmyk();
+        paint = number(cmyk.cyanF()) + ' ' + number(cmyk.magentaF()) + ' '
+            + number(cmyk.yellowF()) + ' ' + number(cmyk.blackF()) + " k\n";
+    } else {
+        paint = (named ? QByteArray("/CS0 cs\n") : QByteArray())
+            + number(color.redF()) + ' ' + number(color.greenF()) + ' '
+            + number(color.blueF()) + (named ? " scn\n" : " rg\n");
+    }
+    const QByteArray pageContent(
+        "/P <</MCID 0>> BDC\n"
+        "20 20 160 80 re f*\n"
+        "EMC\n"
+        "0 g\n"
+        "BT /F1 20 Tf 20 160 Td (Colored fill) Tj ET\n");
+    const auto stream = [](const QByteArray &content) {
+        return QByteArray("<< /Length ") + QByteArray::number(content.size())
+            + " >>\nstream\n" + content + "\nendstream";
+    };
+    QVector<QByteArray> objects{
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        QByteArray("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] "
+            "/Resources << /Font << /F1 4 0 R >> /ColorSpace << /CS0 ")
+            + space + " >> >> /Contents "
+            + (splitContents ? "[5 0 R 6 0 R]" : "5 0 R") + " >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        stream(splitContents ? paint : paint + pageContent)
+    };
+    if (splitContents)
+        objects.append(stream(pageContent));
+    if (iccBased) {
+        objects.append(QByteArray("<< /N 3 /Alternate /DeviceRGB /Length ")
+            + QByteArray::number(iccProfile.size()) + " >>\nstream\n"
+            + iccProfile + "\nendstream");
+    }
+    return writePdfObjects(filePath, objects);
 }
 
 bool createIccBasedTextPdf(const QString &filePath)

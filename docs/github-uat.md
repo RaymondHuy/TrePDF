@@ -1,16 +1,18 @@
 # Manual UAT builds
 
-The [`uat` workflow](../.github/workflows/uat.yml) builds a Release package for
-each of these native platforms:
+The [`uat` workflow](../.github/workflows/uat.yml) builds Windows, Apple Silicon
+and Linux Release packages. The separate
+[`uat-macos-intel` workflow](../.github/workflows/uat-macos-intel.yml) builds only
+the two Intel macOS packages. Run either workflow independently:
 
-| Package | GitHub runner | Toolchain | Output |
-| --- | --- | --- | --- |
-| `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | `.zip`, launch `bin/trepdf.exe` |
-| `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.zip`, open `trepdf.app` |
-| `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.zip`, open `trepdf.app` |
-| `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.zip`, open `trepdf.app` |
-| `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.zip`, open `trepdf.app` |
-| `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
+| Workflow | Package | GitHub runner | Toolchain | Output |
+| --- | --- | --- | --- | --- |
+| `uat` | `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | `.zip`, launch `bin/trepdf.exe` |
+| `uat` | `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.zip`, open `trepdf.app` |
+| `uat` | `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.zip`, open `trepdf.app` |
+| `uat-macos-intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.zip`, open `trepdf.app` |
+| `uat-macos-intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.zip`, open `trepdf.app` |
+| `uat` | `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
 
 Choose `macos-arm64` for Apple Silicon (M1 or newer), or `macos-x64` for Intel
 Macs. Both Qt 6.12 packages require macOS 14.4 or newer,
@@ -31,23 +33,41 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
 1. Commit and push the workflow, CI scripts and associated CMake/version changes.
    The workflow must exist on the default branch for GitHub to show its manual
    dispatch control.
-2. Open **Actions → uat → Run workflow**, select the branch, and start the run.
+2. For Intel, open **Actions → uat-macos-intel → Run workflow**. For Windows,
+   Apple Silicon and Linux, choose **Actions → uat → Run workflow** instead.
+   Select the branch and start the run.
 3. Download the appropriate `TrePDF-0.0.x-<package>` entry under **Artifacts**
-   from the six build outputs. For an Intel Mac, choose
+   in that workflow run. For an Intel Mac, choose
    `TrePDF-0.0.x-macos-x64` (macOS 14.4+) or
    `TrePDF-0.0.x-macos-x64-qt6.11` (macOS 13+).
    Each artifact contains the platform archive and its SHA-256 file. Extract
    the platform archive before launching the app.
 
-There are no automatic push, pull-request or schedule triggers. All six jobs
-run independently; one failed platform does not cancel the others. Artifacts
-are retained for 30 days, subject to repository policy. The workflow only needs
+There are no automatic push, pull-request or schedule triggers. `uat` runs four
+jobs; `uat-macos-intel` runs two. Neither workflow triggers the other. Within
+each workflow, a failed matrix job does not cancel its siblings. Artifacts
+are retained for 30 days, subject to repository policy. Both workflows only need
 `contents: read`; no custom secret, tag write or release publication is required.
+
+With GitHub CLI authenticated, you can also start only the Intel workflow from
+the repository directory and watch its progress:
+
+```sh
+gh workflow run uat-macos-intel.yml
+gh run watch
+```
+
+The first command uses the default branch. Add `--ref your-branch` to select
+another pushed branch; select the Intel run when `gh run watch` prompts.
 
 ## Automatic version
 
-`TREPDF_VERSION` is `0.0.${{ github.run_number }}`. The first new run is `0.0.1`,
-the next is `0.0.2`, and so on. All six packages in a run share the version.
+`TREPDF_VERSION` is `0.0.${{ github.run_number }}`. Each workflow has its own
+counter: its first new run is `0.0.1`, the next is `0.0.2`, and so on. All packages
+in one run share the version, but separate workflows do not synchronize their
+version numbers. The new Intel workflow starts its own sequence; it does not
+continue the old Intel jobs' `uat` run numbers. Identify older and newer builds
+by their workflow run and source commit when comparing across this split.
 Failed or cancelled runs consume their number, so downloadable versions may
 have gaps. **Re-run jobs** keeps the same version; start a new **Run workflow**
 to increment it. This follows GitHub's
@@ -86,7 +106,7 @@ dependencies. The archives include dependency notices and build metadata;
 macOS uses `ditto` and Linux uses tar to preserve permissions and symlinks.
 The workflow pins third-party Actions to commit SHAs.
 
-Both `uat` and `uat-ipad` use Node.js 24 releases of Checkout, Setup Python
+`uat`, `uat-macos-intel` and `uat-ipad` use Node.js 24 releases of Checkout, Setup Python
 and Upload Artifact. Desktop Qt installation also uses a Node.js 24 action;
 Windows initializes MSVC directly through Visual Studio's Developer PowerShell
 instead of a JavaScript action. This runtime belongs to GitHub's build runner,

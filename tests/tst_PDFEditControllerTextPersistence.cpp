@@ -206,15 +206,43 @@ void PDFEditControllerTest::preservesPatternStrokedGraphicsWhenSavingText()
     QVERIFY(candidateForKind(savedCandidates, QStringLiteral("image")).isEmpty());
 }
 
-void PDFEditControllerTest::preservesGrayscaleWhiteFillWhenSavingText()
+void PDFEditControllerTest::preservesGrayscaleFillWhenSavingText_data()
 {
+    QTest::addColumn<double>("gray");
+    QTest::addColumn<bool>("namedColorSpace");
+    QTest::addColumn<bool>("splitContents");
+    QTest::addColumn<bool>("iccBased");
+    QTest::newRow("white") << 1.0 << false << false << false;
+    QTest::newRow("light-gray") << 0.949 << false << false << false;
+    QTest::newRow("mid-gray") << 0.5 << false << false << false;
+    QTest::newRow("named-white") << 1.0 << true << false << false;
+    QTest::newRow("named-light-gray") << 0.949 << true << false << false;
+    QTest::newRow("named-mid-gray") << 0.5 << true << false << false;
+    QTest::newRow("named-light-gray-split-streams") << 0.949 << true << true << false;
+    QTest::newRow("named-mid-gray-split-streams") << 0.5 << true << true << false;
+    QTest::newRow("icc-white") << 1.0 << true << false << true;
+    QTest::newRow("icc-light-gray") << 0.949 << true << false << true;
+    QTest::newRow("icc-mid-gray") << 0.5 << true << false << true;
+    QTest::newRow("icc-light-gray-split-streams") << 0.949 << true << true << true;
+}
+
+void PDFEditControllerTest::preservesGrayscaleFillWhenSavingText()
+{
+    QFETCH(double, gray);
+    QFETCH(bool, namedColorSpace);
+    QFETCH(bool, splitContents);
+    QFETCH(bool, iccBased);
     const QString sourcePath = m_temporaryDirectory.filePath(
-        QStringLiteral("grayscale-white-fill-source.pdf"));
+        QStringLiteral("grayscale-fill-source.pdf"));
     const QString outputPath = m_temporaryDirectory.filePath(
-        QStringLiteral("grayscale-white-fill-output.pdf"));
-    QVERIFY(createGrayscaleWhiteFillPdf(sourcePath));
+        QStringLiteral("grayscale-fill-output.pdf"));
+    QVERIFY(createGrayscaleFillPdf(sourcePath, gray, namedColorSpace, splitContents, iccBased));
     const QImage sourceImage = renderFirstPage(sourcePath, QSize(200, 200));
     QVERIFY(!sourceImage.isNull());
+    const QColor sourceFill = sourceImage.pixelColor(100, 140);
+    QVERIFY(qAbs(sourceFill.red() - qRound(gray * 255)) <= 1);
+    QCOMPARE(sourceFill.green(), sourceFill.red());
+    QCOMPARE(sourceFill.blue(), sourceFill.red());
 
     PDFDocument document;
     PDFEditController controller;
@@ -222,12 +250,12 @@ void PDFEditControllerTest::preservesGrayscaleWhiteFillWhenSavingText()
     controller.setDocument(&document);
     const QVariantMap candidate = candidateForText(
         waitForCandidates(controller, 0),
-        QStringLiteral("Grayscale white fill"));
+        QStringLiteral("Grayscale fill"));
     QVERIFY(!candidate.isEmpty());
     QVERIFY(controller.selectCandidate(
         0,
         candidate.value(QStringLiteral("objectId")).toString()));
-    controller.commitSelectedText(QStringLiteral("Edited grayscale text"));
+    controller.commitSelectedText(QStringLiteral("Gray edit"));
 
     QVERIFY(controller.saveAs(QUrl::fromLocalFile(outputPath)));
     const QString verificationPath = qEnvironmentVariable(
@@ -244,6 +272,85 @@ void PDFEditControllerTest::preservesGrayscaleWhiteFillWhenSavingText()
             outputImage,
             QRect(30, 110, 140, 60)),
         0);
+    QVERIFY(normalizedPageText(outputPath).contains(QStringLiteral("Gray edit")));
+    QVERIFY(candidateForKind(waitForCandidates(controller, 0), QStringLiteral("image")).isEmpty());
+
+    // Reopen/edit/save again: the retained background must remain vector paint
+    // with the same visible gray, not only survive the first Save As.
+    QVERIFY(controller.selectCandidate(0, candidateForText(
+        waitForCandidates(controller, 0), QStringLiteral("Gray edit"))
+        .value(QStringLiteral("objectId")).toString()));
+    controller.commitSelectedText(QStringLiteral("Gray saved"));
+    QVERIFY(controller.save());
+    const QImage savedAgain = renderFirstPage(outputPath, sourceImage.size());
+    QVERIFY(!savedAgain.isNull());
+    QCOMPARE(changedPixelCount(sourceImage, savedAgain, QRect(30, 110, 140, 60)), 0);
+    QVERIFY(normalizedPageText(outputPath).contains(QStringLiteral("Gray saved")));
+}
+
+void PDFEditControllerTest::preservesColoredFillWhenSavingText_data()
+{
+    QTest::addColumn<QColor>("color");
+    QTest::addColumn<int>("colorSpace");
+    QTest::addColumn<bool>("splitContents");
+    const struct {
+        const char *name;
+        QColor color;
+    } colors[] = {
+        {"red", QColor(204, 51, 51)},
+        {"green", QColor(51, 179, 77)},
+        {"blue", QColor(26, 102, 204)},
+        {"yellow", QColor(230, 204, 26)},
+        {"cyan", QColor(26, 204, 204)},
+        {"magenta", QColor(204, 26, 179)}
+    };
+    const auto addRows = [&colors](const char *prefix, SolidFillColorSpace colorSpace) {
+        for (const auto &[name, color] : colors) {
+            const QByteArray row = QByteArray(prefix) + '-' + name;
+            QTest::newRow(row.constData()) << color << static_cast<int>(colorSpace) << false;
+        }
+    };
+    addRows("rgb", SolidFillColorSpace::DeviceRgb);
+    addRows("named-rgb", SolidFillColorSpace::NamedRgb);
+    addRows("icc-rgb", SolidFillColorSpace::IccRgb);
+    addRows("cmyk", SolidFillColorSpace::DeviceCmyk);
+    QTest::newRow("icc-rgb-blue-split-streams")
+        << QColor(26, 102, 204) << static_cast<int>(SolidFillColorSpace::IccRgb) << true;
+}
+
+void PDFEditControllerTest::preservesColoredFillWhenSavingText()
+{
+    QFETCH(QColor, color);
+    QFETCH(int, colorSpace);
+    QFETCH(bool, splitContents);
+    const QString sourcePath = m_temporaryDirectory.filePath(QStringLiteral("colored-fill-source.pdf"));
+    const QString outputPath = m_temporaryDirectory.filePath(QStringLiteral("colored-fill-output.pdf"));
+    QVERIFY(createColoredFillPdf(sourcePath, color,
+        static_cast<SolidFillColorSpace>(colorSpace), splitContents));
+    const QImage before = renderFirstPage(sourcePath, QSize(200, 200));
+    QVERIFY(!before.isNull());
+    const QColor sourceFill = before.pixelColor(100, 140);
+    QVERIFY(sourceFill.red() != sourceFill.green() || sourceFill.green() != sourceFill.blue());
+
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(sourcePath)));
+    controller.setDocument(&document);
+    QString previousText = QStringLiteral("Colored fill");
+    for (int pass = 0; pass < 2; ++pass) {
+        const auto candidate = candidateForText(waitForCandidates(controller, 0), previousText);
+        QVERIFY(!candidate.isEmpty());
+        QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
+        const QString editedText = pass == 0 ? QStringLiteral("Color edit") : QStringLiteral("Color saved");
+        controller.commitSelectedText(editedText);
+        QVERIFY(pass == 0 ? controller.saveAs(QUrl::fromLocalFile(outputPath)) : controller.save());
+        const QImage after = renderFirstPage(outputPath, before.size());
+        QVERIFY(!after.isNull());
+        QCOMPARE(changedPixelCount(before, after, QRect(30, 110, 140, 60)), 0);
+        QVERIFY(normalizedPageText(outputPath).contains(editedText));
+        QVERIFY(candidateForKind(waitForCandidates(controller, 0), QStringLiteral("image")).isEmpty());
+        previousText = editedText;
+    }
 }
 
 void PDFEditControllerTest::preservesIccBasedTextColorWhenEditingSibling()

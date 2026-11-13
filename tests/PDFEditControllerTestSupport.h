@@ -181,7 +181,23 @@ bool createPatternFillPdf(const QString &filePath);
 
 bool createPatternStrokePdf(const QString &filePath);
 
-bool createGrayscaleWhiteFillPdf(const QString &filePath);
+bool createGrayscaleFillPdf(const QString &filePath,
+                            qreal gray,
+                            bool namedColorSpace,
+                            bool splitContents,
+                            bool iccBased);
+
+enum class SolidFillColorSpace {
+    DeviceRgb,
+    NamedRgb,
+    IccRgb,
+    DeviceCmyk
+};
+
+bool createColoredFillPdf(const QString &filePath,
+                          const QColor &color,
+                          SolidFillColorSpace colorSpace,
+                          bool splitContents);
 
 bool createIccBasedTextPdf(const QString &filePath);
 
