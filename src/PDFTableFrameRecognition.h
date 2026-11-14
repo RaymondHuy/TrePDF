@@ -49,7 +49,7 @@ struct Object {
     QVector<Primitive> primitives;
 };
 
-inline bool near(qreal a, qreal b)
+inline bool withinTolerance(qreal a, qreal b)
 {
     return std::abs(a - b) <= Tolerance;
 }
@@ -168,10 +168,10 @@ inline bool readObject(FPDF_PAGEOBJECT path, int index,
             const auto delta = edges[edge].second - edges[edge].first;
             const auto next = edges[(edge + 1) % edges.size()].second
                 - edges[(edge + 1) % edges.size()].first;
-            const bool horizontal = near(delta.y(), 0) && std::abs(delta.x()) > Tolerance;
-            const bool vertical = near(delta.x(), 0) && std::abs(delta.y()) > Tolerance;
+            const bool horizontal = withinTolerance(delta.y(), 0) && std::abs(delta.x()) > Tolerance;
+            const bool vertical = withinTolerance(delta.x(), 0) && std::abs(delta.y()) > Tolerance;
             if ((!horizontal && !vertical) || edges[edge].second != edges[(edge + 1) % edges.size()].first
-                || (horizontal && !near(next.x(), 0)) || (vertical && !near(next.y(), 0)))
+                || (horizontal && !withinTolerance(next.x(), 0)) || (vertical && !withinTolerance(next.y(), 0)))
                 return false;
             left = qMin(left, edges[edge].first.x());
             right = qMax(right, edges[edge].first.x());
@@ -182,7 +182,7 @@ inline bool readObject(FPDF_PAGEOBJECT path, int index,
         result.width = qMin(ink.width(), ink.height());
         if (result.width < .75 - .001 || result.width > 2.5)
             return false;
-        const auto axis = near(ink.width(), ink.height()) ? Primitive::Junction
+        const auto axis = withinTolerance(ink.width(), ink.height()) ? Primitive::Junction
             : ink.width() > ink.height() ? Primitive::Horizontal : Primitive::Vertical;
         result.primitives.append({axis, ink, -1});
     } else {
@@ -191,8 +191,8 @@ inline bool readObject(FPDF_PAGEOBJECT path, int index,
             return false;
         for (const auto &edge : edges) {
             const auto delta = edge.second - edge.first;
-            const bool horizontal = near(delta.y(), 0) && std::abs(delta.x()) > Tolerance;
-            const bool vertical = near(delta.x(), 0) && std::abs(delta.y()) > Tolerance;
+            const bool horizontal = withinTolerance(delta.y(), 0) && std::abs(delta.x()) > Tolerance;
+            const bool vertical = withinTolerance(delta.x(), 0) && std::abs(delta.y()) > Tolerance;
             if (!horizontal && !vertical)
                 return false;
             const qreal half = result.width / 2;
@@ -223,7 +223,7 @@ inline QVector<qreal> axes(QVector<qreal> coordinates)
     QVector<qreal> result;
     for (qsizetype begin = 0; begin < coordinates.size();) {
         qsizetype end = begin + 1;
-        while (end < coordinates.size() && near(coordinates[begin], coordinates[end]))
+        while (end < coordinates.size() && withinTolerance(coordinates[begin], coordinates[end]))
             ++end;
         result.append((coordinates[begin] + coordinates[end - 1]) / 2);
         begin = end;
@@ -253,7 +253,7 @@ inline bool buildGroup(const QVector<Object> &objects, const QVector<Primitive> 
     for (int index : component) {
         const auto &part = primitives[index];
         const auto &owner = objects[part.owner];
-        if (owner.color != firstObject.color || !near(owner.width, width))
+        if (owner.color != firstObject.color || !withinTolerance(owner.width, width))
             return false;
         owners.insert(part.owner);
         if (part.axis == Primitive::Horizontal)
@@ -275,7 +275,7 @@ inline bool buildGroup(const QVector<Object> &objects, const QVector<Primitive> 
         || !QRectF(QPointF(0, 0), pageSize).contains(frame))
         return false;
     const auto atAxis = [](const QVector<qreal> &values, qreal value) {
-        return std::any_of(values.cbegin(), values.cend(), [value](qreal axis) { return near(value, axis); });
+        return std::any_of(values.cbegin(), values.cend(), [value](qreal axis) { return withinTolerance(value, axis); });
     };
     for (int index : component) {
         const auto &part = primitives[index];
@@ -291,9 +291,9 @@ inline bool buildGroup(const QVector<Object> &objects, const QVector<Primitive> 
             QVector<QPair<qreal, qreal>> intervals;
             for (int index : component) {
                 const auto &part = primitives[index];
-                if (isHorizontal && part.axis != Primitive::Vertical && near(part.ink.center().y(), axis))
+                if (isHorizontal && part.axis != Primitive::Vertical && withinTolerance(part.ink.center().y(), axis))
                     intervals.append({part.ink.left(), part.ink.right()});
-                else if (!isHorizontal && part.axis != Primitive::Horizontal && near(part.ink.center().x(), axis))
+                else if (!isHorizontal && part.axis != Primitive::Horizontal && withinTolerance(part.ink.center().x(), axis))
                     intervals.append({part.ink.top(), part.ink.bottom()});
             }
             if (!covered(std::move(intervals), isHorizontal ? centers.left() : centers.top(),
