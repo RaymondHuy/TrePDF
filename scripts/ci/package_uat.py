@@ -47,6 +47,29 @@ def sign_macos_bundle(app: Path) -> None:
     verify_macos_bundle(app)
 
 
+def create_macos_dmg(stage: Path, destination: Path, version: str) -> None:
+    # Keep the ZIP staging tree unchanged, including its framework symlinks.
+    with tempfile.TemporaryDirectory(prefix="trepdf-dmg-") as temporary:
+        contents = Path(temporary) / "contents"
+        subprocess.run(["ditto", str(stage), str(contents)], check=True)
+        (contents / "Applications").symlink_to("/Applications", target_is_directory=True)
+        subprocess.run(["hdiutil", "create", "-volname", f"TrePDF {version}",
+                        "-srcfolder", str(contents), "-fs", "HFS+", "-format", "UDZO",
+                        str(destination)], check=True)
+        subprocess.run(["hdiutil", "verify", str(destination)], check=True)
+        mount = Path(temporary) / "mounted"
+        mount.mkdir()
+        subprocess.run(["hdiutil", "attach", str(destination), "-readonly", "-nobrowse",
+                        "-mountpoint", str(mount)], check=True)
+        try:
+            verify_macos_bundle(mount / "trepdf.app")
+            shortcut = mount / "Applications"
+            if not shortcut.is_symlink() or os.readlink(shortcut) != "/Applications":
+                raise RuntimeError("DMG is missing its Applications shortcut")
+        finally:
+            subprocess.run(["hdiutil", "detach", str(mount)], check=True)
+
+
 def smoke_test(executable: Path, target: str) -> None:
     # Do not let a runner's Qt/dependency paths hide missing deployed libraries.
     environment = os.environ.copy()
@@ -100,6 +123,8 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--variant", default="",
                         help="Optional archive suffix, for example qt6.11")
+    parser.add_argument("--macos-dmg", action="store_true",
+                        help="Also create and verify a drag-to-install macOS DMG")
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--dependencies", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -108,6 +133,8 @@ def main() -> None:
         parser.error("UAT version must have the form 0.0.x, with x >= 1")
     if args.variant and not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", args.variant):
         parser.error("Package variant must contain only lowercase letters, digits, dots or hyphens")
+    if args.macos_dmg and args.platform not in MACOS_ARCHITECTURES:
+        parser.error("--macos-dmg requires a macOS platform")
     package = args.platform + (f"-{args.variant}" if args.variant else "")
     stage = args.stage.resolve()
     manifest = json.loads((args.dependencies / "manifest.json").read_text(encoding="utf-8"))
@@ -149,12 +176,13 @@ def main() -> None:
         (stage / "START-HERE.txt").write_text(
             f"TrePDF UAT for macOS ({processor})\n\n"
             "This build has an ad-hoc integrity signature, without Apple notarization.\n"
-            "After verifying the archive SHA-256, extract it and open trepdf.app.\n"
+            "After verifying the package SHA-256, open the DMG and drag trepdf.app\n"
+            "to Applications, or extract the ZIP and open trepdf.app.\n"
             "If macOS blocks it as an unidentified developer, approve this app in\n"
             "System Settings > Privacy & Security > Open Anyway.\n"
             "If signature verification fails or it is reported as damaged, do not\n"
             "override that warning; download a newly built package.\n\n"
-            "Verify the extracted app: codesign --verify --deep --strict trepdf.app\n"
+            "Verify the app: codesign --verify --deep --strict /path/to/trepdf.app\n"
             "https://support.apple.com/en-us/102445\n", encoding="utf-8")
     else:
         smoke_test(executable, args.platform)
@@ -199,18 +227,27 @@ def main() -> None:
         archive = Path(shutil.make_archive(str(archive_base),
                        "zip" if args.platform == "windows-x64" else "gztar",
                        root_dir=stage.parent, base_dir=stage.name))
-    digest = hashlib.sha256()
-    with archive.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    checksum = f"{digest.hexdigest()}  {archive.name}\n"
-    Path(str(archive) + ".sha256").write_text(checksum, encoding="utf-8")
-    print(checksum, end="", flush=True)
+    archives = [archive]
+    if args.macos_dmg:
+        dmg = Path(str(archive_base) + ".dmg")
+        create_macos_dmg(stage, dmg, args.version)
+        archives.append(dmg)
+    for archive in archives:
+        digest = hashlib.sha256()
+        with archive.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        checksum = f"{digest.hexdigest()}  {archive.name}\n"
+        Path(str(archive) + ".sha256").write_text(checksum, encoding="utf-8")
+        print(checksum, end="", flush=True)
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(summary, "a", encoding="utf-8") as stream:
-            stream.write(f"### TrePDF {args.version} — {package}\n\n"
-                         f"Package: `{archive.name}`\n\n"
-                         "Release build, runtime deployment and startup smoke check passed.\n")
+            stream.write(f"### TrePDF {args.version} — {package}\n\n")
+            for archive in archives:
+                stream.write(f"- `{archive.name}` and `{archive.name}.sha256`\n")
+            stream.write("\nRelease build, runtime deployment and startup smoke check passed.\n")
+            if args.macos_dmg:
+                stream.write("DMG verification and mounted app signature check passed.\n")
 
 
 if __name__ == "__main__":
