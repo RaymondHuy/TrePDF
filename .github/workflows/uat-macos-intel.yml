@@ -101,11 +101,30 @@ jobs:
             --stage "build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE" \
             --dependencies _deps/uat --output artifacts --macos-dmg
 
+      - name: Upload DMG directly
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: artifacts/TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}.dmg
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload DMG checksum directly
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: artifacts/TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}.dmg.sha256
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
-          path: artifacts/*
+          path: |
+            artifacts/*
+            !artifacts/*.dmg
+            !artifacts/*.dmg.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
