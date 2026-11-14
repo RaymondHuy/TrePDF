@@ -8,10 +8,10 @@ the two Intel macOS packages. Run either workflow independently:
 | Workflow | Package | GitHub runner | Toolchain | Output |
 | --- | --- | --- | --- | --- |
 | `uat` | `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | `.zip`, launch `bin/trepdf.exe` |
-| `uat` | `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.zip`, open `trepdf.app` |
-| `uat` | `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.zip`, open `trepdf.app` |
-| `uat-macos-intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.zip`, open `trepdf.app` |
-| `uat-macos-intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.zip`, open `trepdf.app` |
+| `uat` | `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.dmg` and `.zip` |
+| `uat` | `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.dmg` and `.zip` |
+| `uat-macos-intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.dmg` and `.zip` |
+| `uat-macos-intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.dmg` and `.zip` |
 | `uat` | `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
 
 Choose `macos-arm64` for Apple Silicon (M1 or newer), or `macos-x64` for Intel
@@ -40,8 +40,21 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
    in that workflow run. For an Intel Mac, choose
    `TrePDF-0.0.x-macos-x64` (macOS 14.4+) or
    `TrePDF-0.0.x-macos-x64-qt6.11` (macOS 13+).
-   Each artifact contains the platform archive and its SHA-256 file. Extract
-   the platform archive before launching the app.
+   Extract the downloaded artifact. Each macOS artifact contains both a `.dmg`
+   and a `.zip`, with a separate `.sha256` file for each. Windows and Linux
+   artifacts contain their platform archive and its checksum.
+4. On macOS, verify the DMG checksum from the extracted artifact directory,
+   replacing the filename below with your package:
+
+   ```sh
+   shasum -a 256 -c TrePDF-0.0.x-macos-arm64.dmg.sha256
+   ```
+
+   Open the `.dmg`, drag `trepdf.app` onto its **Applications** shortcut, then
+   eject the disk image and open TrePDF from Applications. The ZIP remains
+   available if you prefer extracting the app directly. Read `START-HERE.txt`
+   for signature verification and first-launch instructions. On Windows and
+   Linux, extract the platform archive before launching the app.
 
 There are no automatic push, pull-request or schedule triggers. `uat` runs four
 jobs; `uat-macos-intel` runs two. Neither workflow triggers the other. Within
@@ -76,8 +89,9 @@ to increment it. This follows GitHub's
 The version is passed to CMake and embedded in the application, macOS bundle
 and Windows executable metadata. It is also recorded in the archive name,
 `VERSION`, and `build-info.json` alongside the source commit and dependency
-versions. Each Qt 6.11 package has a distinct staging directory, artifact, ZIP
-and checksum name; its metadata records `qt: 6.11.0` and `variant: qt6.11`.
+versions. Each Qt 6.11 package uses distinct names for its staging directory,
+artifact, ZIP, DMG and checksums; its metadata records `qt: 6.11.0` and
+`variant: qt6.11`.
 Each macOS job uses native PDF dependencies matching its architecture.
 The build does not commit a version bump back to the repository.
 Local builds keep the default `0.1.0` unless `-DTREPDF_VERSION=...` is supplied.
@@ -130,6 +144,15 @@ library deployment before uploading an artifact.
 Packaging also checks that the app executable contains the requested ARM64 or
 x86_64 architecture before signing, so an incorrectly labelled archive is rejected.
 
+Both desktop workflows pass `--macos-dmg` to `package_uat.py` for their macOS
+jobs. It also creates a compressed UDZO disk image containing `trepdf.app`,
+an Applications shortcut, `START-HERE.txt`, `VERSION`, `build-info.json` and
+dependency licenses. Packaging runs `hdiutil verify`, mounts the image read-only,
+checks the app signature and Applications shortcut, then detaches it. Each ZIP
+and DMG receives its own SHA-256 file before upload. This uses macOS's built-in
+tools and needs no additional secrets. The local `pipelines/build-macos.sh`
+script does not enable this option and continues to produce ZIP packages.
+
 [`package_uat.py`](../scripts/ci/package_uat.py) launches the staged app from a
 temporary working directory with external Qt/library paths cleared and the
 software backend enabled (Cocoa on macOS, offscreen on Windows/Linux).
@@ -147,7 +170,8 @@ Do not override a damaged/invalid signature warning; rebuild or download the
 fixed package. Each macOS archive includes `START-HERE.txt` with these instructions.
 Public distribution without this manual approval needs Developer ID signing and
 Apple notarization. The workflow does not change Gatekeeper settings or publish
-a GitHub Release. The archives are not installers.
+a GitHub Release. The DMG provides drag-to-install packaging; it does not add
+Developer ID signing or notarization.
 
 For deployment API details, see Qt's
 [QML application deployment documentation](https://doc.qt.io/qt-6/qt-generate-deploy-qml-app-script.html).

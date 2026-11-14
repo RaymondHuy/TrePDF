@@ -63,9 +63,10 @@ universal binaries. The current desktop workflows configure Qt 6.12 packages
 for macOS 14.4+, with Qt 6.11 variants targeting macOS 13+.
 
 For test packages, follow the [manual UAT guide](docs/github-uat.md). It explains
-how to run a workflow and download its artifacts. These workflows do not publish
-GitHub Releases or run the full feature test suite. Current macOS test packages
-use ad-hoc signing and are not notarized.
+how to run a workflow and download its artifacts. Each macOS job provides a
+drag-to-install `.dmg` and a `.zip`, with separate SHA-256 files. These workflows
+do not publish GitHub Releases or run the full feature test suite. Current
+macOS test packages use ad-hoc signing and are not notarized.
 
 ## Build
 

@@ -230,14 +230,18 @@ your development Mac is Apple Silicon:
 3. After the Intel job succeeds, download its artifact:
    - `TrePDF-0.0.x-macos-x64` for macOS 14.4 or newer (Qt 6.12).
    - `TrePDF-0.0.x-macos-x64-qt6.11` for macOS 13 or newer (Qt 6.11).
-4. Extract the artifact and the package ZIP inside it, then drag `trepdf.app`
-   into Applications. Keep the included notices and `START-HERE.txt` with the
-   package when sharing it.
+4. Extract the artifact, verify the `.dmg.sha256` checksum, then open the DMG
+   and drag `trepdf.app` onto its Applications shortcut. Eject the image and
+   launch TrePDF from Applications. The artifact also includes a ZIP of the
+   same app. Keep the included notices and `START-HERE.txt` with the package
+   when sharing it; see the [download instructions](github-uat.md#run-and-download).
 
 This workflow launches only the two Intel jobs. Windows, Apple Silicon and Linux
-remain in the independent `uat` workflow. Each Intel job produces a separate
-ZIP and checksum, not a universal binary or a DMG. These packages use ad-hoc
-signing as described below. Each workflow has its own `0.0.x` version counter.
+remain in the independent `uat` workflow. Each macOS job produces a separate
+DMG and ZIP, each with its own checksum; these are architecture-specific
+packages. They use ad-hoc signing as described below. Each workflow has its own
+`0.0.x` version counter. The local `pipelines/build-macos.sh` script continues
+to produce ZIP packages; use the local DMG instructions above for that path.
 
 For a local build on an Intel Mac, follow the dependency preparation and CMake
 commands in [`.github/workflows/uat-macos-intel.yml`](../.github/workflows/uat-macos-intel.yml), with
