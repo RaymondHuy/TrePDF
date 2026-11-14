@@ -99,7 +99,7 @@ jobs:
             --platform "$TREPDF_PLATFORM" --version "$TREPDF_VERSION" \
             --variant "$TREPDF_VARIANT" \
             --stage "build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE" \
-            --dependencies _deps/uat --output artifacts
+            --dependencies _deps/uat --output artifacts --macos-dmg
 
       - name: Upload package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
