@@ -862,15 +862,19 @@ Build command:
   `QT_TRID_NOOP`.
 - Use `%1`, `%2`, or `%n` placeholders instead of concatenating translated
   fragments. Preserve every placeholder in all translations.
-- Vietnamese is currently the default language. `src/main.cpp` sets the QML
-  engine UI language to `vi`, and the catalog lives at `i18n/qml_vi.ts`.
+- Vietnamese is the default and fallback language. `src/main.cpp` initializes
+  `ApplicationLanguage.h` before loading QML; it restores and persists the
+  supported locale through the `Interface/language` QSettings key. Settings >
+  Language uses `LanguageMenuButton.qml` to change `Qt.uiLanguage` at runtime.
+  Keep the menu's native language names recognizable in every translation.
 - Translation files must use the `qml_<locale>.ts` naming scheme so
   `QQmlApplicationEngine` can load them automatically.
 - Keep the translation resource prefix at `/qt/qml/TrePDF/src/i18n` while
   `Main.qml` is packaged as `src/Main.qml`. The engine searches for `i18n`
   adjacent to the main QML file.
 - Add a locale to `I18N_TRANSLATED_LANGUAGES` in `CMakeLists.txt` before adding
-  its `i18n/qml_<locale>.ts` catalog.
+  its `i18n/qml_<locale>.ts` catalog, then register the supported locale in
+  `ApplicationLanguage.h` and expose it in `LanguageMenuButton.qml`.
 
 After changing any user-visible text, update and validate translations:
 

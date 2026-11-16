@@ -60,7 +60,7 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
 qt_standard_project_setup(
     REQUIRES 6.8
     I18N_SOURCE_LANGUAGE en
-    I18N_TRANSLATED_LANGUAGES vi en hr th
+    I18N_TRANSLATED_LANGUAGES vi en hr th fr de es pt_BR ja zh_CN ko id
 )
 
 if(IOS AND (NOT PDFium_ROOT OR NOT QPDF_ROOT))
@@ -350,9 +350,11 @@ qt_add_qml_module(trepdf
         src/SignatureLibrary.h
         src/UserFontManager.cpp
         src/UserFontManager.h
+        src/ApplicationLanguage.h
     QML_FILES
         src/Main.qml
         src/Components/AppRibbon.qml
+        src/Components/LanguageMenuButton.qml
         src/Components/InformationRibbon.qml
         src/Components/AppTheme.qml
         src/Components/ShearedTextView.qml
@@ -453,6 +455,7 @@ qt_add_qml_module(trepdf
         src/assets/icons/dropdown-menu.svg
         src/assets/icons/edit-text.svg
         src/assets/icons/folder-open.svg
+        src/assets/icons/globe.svg
         src/assets/icons/highlight.svg
         src/assets/icons/image-plus.svg
         src/assets/icons/italic-font.svg

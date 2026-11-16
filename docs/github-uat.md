@@ -36,25 +36,34 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
 2. For Intel, open **Actions → uat-macos-intel → Run workflow**. For Windows,
    Apple Silicon and Linux, choose **Actions → uat → Run workflow** instead.
    Select the branch and start the run.
-3. Download the appropriate `TrePDF-0.0.x-<package>` entry under **Artifacts**
-   in that workflow run. For an Intel Mac, choose
-   `TrePDF-0.0.x-macos-x64` (macOS 14.4+) or
-   `TrePDF-0.0.x-macos-x64-qt6.11` (macOS 13+).
-   Extract the downloaded artifact. Each macOS artifact contains both a `.dmg`
-   and a `.zip`, with a separate `.sha256` file for each. Windows and Linux
-   artifacts contain their platform archive and its checksum.
-4. On macOS, verify the DMG checksum from the extracted artifact directory,
-   replacing the filename below with your package:
+3. On macOS, download the `TrePDF-0.0.x-<package>.dmg` entry under **Artifacts**
+   in that workflow run. This downloads the DMG directly, with no outer ZIP to
+   extract. For an Intel Mac, choose `TrePDF-0.0.x-macos-x64.dmg` (macOS 14.4+)
+   or `TrePDF-0.0.x-macos-x64-qt6.11.dmg` (macOS 13+). The matching
+   `.dmg.sha256` entry is a separate direct download for checksum verification.
+4. To verify the DMG, save its `.dmg.sha256` file in the same directory and run
+   the following command there, replacing the filename with your package:
 
    ```sh
    shasum -a 256 -c TrePDF-0.0.x-macos-arm64.dmg.sha256
    ```
 
-   Open the `.dmg`, drag `trepdf.app` onto its **Applications** shortcut, then
-   eject the disk image and open TrePDF from Applications. The ZIP remains
-   available if you prefer extracting the app directly. Read `START-HERE.txt`
-   for signature verification and first-launch instructions. On Windows and
-   Linux, extract the platform archive before launching the app.
+   Open the `.dmg`: TrePDF appears on the left, with an arrow pointing to the
+   **Applications** shortcut on the right. Drag the app onto that shortcut,
+   eject the disk image and open TrePDF from Applications. Open
+   `Read Me/START-HERE.txt` inside the image for signature verification and
+   first-launch instructions.
+
+The `TrePDF-0.0.x-<package>` artifact without a filename extension remains the
+ZIP fallback on macOS: extract that artifact, then the package ZIP inside it.
+It contains the ZIP and its checksum, while the DMG and DMG checksum have their
+own entries. On Windows and Linux, download this package artifact and extract
+the platform archive before launching the app.
+
+Direct DMG downloads apply to new runs of the updated workflow. After pushing
+these changes, choose **Run workflow** and the updated branch. **Re-run jobs**
+on an older run uses that run's old workflow and retains its previous packaging.
+See GitHub's [re-run behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
 There are no automatic push, pull-request or schedule triggers. `uat` runs four
 jobs; `uat-macos-intel` runs two. Neither workflow triggers the other. Within
@@ -145,13 +154,25 @@ Packaging also checks that the app executable contains the requested ARM64 or
 x86_64 architecture before signing, so an incorrectly labelled archive is rejected.
 
 Both desktop workflows pass `--macos-dmg` to `package_uat.py` for their macOS
-jobs. It also creates a compressed UDZO disk image containing `trepdf.app`,
-an Applications shortcut, `START-HERE.txt`, `VERSION`, `build-info.json` and
-dependency licenses. Packaging runs `hdiutil verify`, mounts the image read-only,
-checks the app signature and Applications shortcut, then detaches it. Each ZIP
-and DMG receives its own SHA-256 file before upload. This uses macOS's built-in
-tools and needs no additional secrets. The local `pipelines/build-macos.sh`
-script does not enable this option and continues to produce ZIP packages.
+jobs. macOS jobs install the pinned dependencies in
+[`requirements-macos-dmg.txt`](../scripts/ci/requirements-macos-dmg.txt):
+`dmgbuild` 1.6.7, `ds-store` 1.3.3 and `mac-alias` 2.2.3. Packaging creates a
+compressed UDZO disk image with a saved 640 × 420 Finder icon view: `trepdf.app`
+on the left, Applications on the right, and a Retina arrow between them. A
+visible **Read Me** folder below contains `START-HERE.txt`, `VERSION`,
+`build-info.json` and dependency licenses. The layout is written into the image
+without automating Finder. The ZIP keeps its existing directory layout.
+
+Packaging runs `hdiutil verify`, mounts the image read-only, checks the app
+signature, Applications shortcut, saved icon positions, background and support
+files, then detaches it. Each ZIP and DMG receives
+its own SHA-256 file before upload. The pinned
+[`upload-artifact` action](https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/README.md#upload-an-individual-file-unzipped)
+uploads the DMG and its checksum separately with `archive: false`, so each is
+downloaded as its original file. The existing package artifact contains the ZIP
+and ZIP checksum. Packaging needs no additional secrets. The local
+`pipelines/build-macos.sh` script does not enable this option and continues to
+produce ZIP packages.
 
 [`package_uat.py`](../scripts/ci/package_uat.py) launches the staged app from a
 temporary working directory with external Qt/library paths cleared and the
@@ -167,7 +188,8 @@ Gatekeeper trust. For a trusted UAT download, verify its checksum and app signat
 then use **System Settings → Privacy & Security → Open Anyway** if macOS blocks
 the unidentified developer. See [Apple's instructions](https://support.apple.com/en-us/102445).
 Do not override a damaged/invalid signature warning; rebuild or download the
-fixed package. Each macOS archive includes `START-HERE.txt` with these instructions.
+fixed package. These instructions are in `Read Me/START-HERE.txt` on the DMG
+and `START-HERE.txt` in the ZIP package.
 Public distribution without this manual approval needs Developer ID signing and
 Apple notarization. The workflow does not change Gatekeeper settings or publish
 a GitHub Release. The DMG provides drag-to-install packaging; it does not add

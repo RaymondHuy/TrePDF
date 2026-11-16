@@ -598,6 +598,12 @@ Column {
                     enabled: !root.anySaving
                     onClicked: root.fontSettingsRequested()
                 }
+
+                LanguageMenuButton {
+                    theme: root.theme
+                    documentLoaded: root.document.loaded
+                    enabled: !root.anySaving
+                }
             }
         }
     }

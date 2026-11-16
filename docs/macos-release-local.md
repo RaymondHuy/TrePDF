@@ -85,21 +85,13 @@ with the intended `major.minor.patch` value. A fresh local build defaults to
 
 ## Build with another UI language
 
-The desktop application currently chooses its UI language explicitly in
-[`src/main.cpp`](../src/main.cpp):
+Every desktop build includes all twelve UI languages. Open **Settings → Language**
+and choose a language from the list below. The interface updates immediately,
+and TrePDF remembers the selection after restarting. The menu scrolls when the
+window is too short to show every language.
+Vietnamese is the default when no supported selection has been saved.
 
-```cpp
-engine.setUiLanguage(QStringLiteral("vi"));
-```
-
-There is currently no CMake option or command-line argument for selecting the UI
-language. To build an English application, change that line to:
-
-```cpp
-engine.setUiLanguage(QStringLiteral("en"));
-```
-
-The existing translation catalogs are:
+The bundled translation catalogs are:
 
 | Locale | UI language | Catalog |
 | --- | --- | --- |
@@ -107,30 +99,26 @@ The existing translation catalogs are:
 | `en` | English | `i18n/qml_en.ts` |
 | `hr` | Croatian | `i18n/qml_hr.ts` |
 | `th` | Thai | `i18n/qml_th.ts` |
+| `fr` | French | `i18n/qml_fr.ts` |
+| `de` | German | `i18n/qml_de.ts` |
+| `es` | Spanish | `i18n/qml_es.ts` |
+| `pt_BR` | Portuguese (Brazil) | `i18n/qml_pt_BR.ts` |
+| `ja` | Japanese | `i18n/qml_ja.ts` |
+| `zh_CN` | Chinese (Simplified) | `i18n/qml_zh_CN.ts` |
+| `ko` | Korean | `i18n/qml_ko.ts` |
+| `id` | Indonesian | `i18n/qml_id.ts` |
 
-After changing the locale, rebuild and launch the application:
-
-```sh
-/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake \
-  --build cmake-build-release --target trepdf --parallel 8
-
-open cmake-build-release/trepdf.app
-```
-
-Quit the running application before opening the rebuilt bundle. Selecting one
-of these existing locales does not require running `update_translations` or
-changing the list of languages in CMake. All configured catalogs remain bundled;
-the selected locale determines which one the application loads.
-
-This is a source change shared by subsequent builds, not a per-build-directory
-setting. Change the line back to `vi` and rebuild when you want Vietnamese again.
-It changes interface text, not the document contents or OCR recognition languages.
+Switching between these languages requires no source change, rebuild, new
+package, or download. The choice is a per-user setting, stored as
+`Interface/language` through `QSettings` by
+[`ApplicationLanguage.h`](../src/ApplicationLanguage.h). It changes interface
+text, not document contents or OCR recognition languages.
 
 For a language without a catalog, follow the
 [localization instructions](../README.md#localization): register the locale in
-`I18N_TRANSLATED_LANGUAGES`, generate and complete its catalog, then select that
-locale in `src/main.cpp` and rebuild. The website's language list is independent
-of the application's catalogs.
+`I18N_TRANSLATED_LANGUAGES`, generate and complete its catalog, add it to
+`ApplicationLanguage.h` and `LanguageMenuButton.qml`, then rebuild. The website's
+language list is independent of the application's catalogs.
 
 ## Common setup issues
 
@@ -152,6 +140,10 @@ A `.dmg` is a disk image containing `trepdf.app` and an Applications shortcut.
 Open the image and drag the application onto that shortcut to install it.
 TrePDF does not need a `.pkg` installer for this workflow.
 
+The local recipe below creates a plain disk image. The
+[GitHub Actions DMG](github-uat.md#run-and-download) also saves a Finder icon
+layout with the app on the left, an arrow, and Applications on the right.
+
 First complete **Configure and build** above. The raw build bundle can still
 depend on your Qt SDK. Enable `TREPDF_DEPLOY_RUNTIME` and run `cmake --install`
 to gather the Qt frameworks, QML imports and plugins into an installed bundle.
@@ -161,7 +153,7 @@ alongside the bundled PDFium, qpdf and OCR resources. Qt Svg must also be instal
 in the selected SDK.
 
 Run this entire block from the repository root. It reuses your Release build's
-version and selected UI language, creates a fresh staging directory, signs the
+version and bundled language catalogs, creates a fresh staging directory, signs the
 installed app ad-hoc, checks startup, and creates a compressed DMG. Python 3 and
 the macOS `codesign` and `hdiutil` tools are required. The startup check opens the
 packaged application for about 12 seconds and then closes that test process.
@@ -209,7 +201,7 @@ The commands leave `TREPDF_DEPLOY_RUNTIME=ON` in the Release build cache.
 
 The package targets Apple Silicon and, with the Qt 6.12.0 SDK above, macOS 14.4
 or newer. Check it on a compatible Mac without the Qt SDK before distributing
-it. Changing the UI language requires rebuilding and creating a new package.
+it. Users select their UI language from Settings after installing the same package.
 
 The commands reuse only the signing and startup-check helpers from
 `scripts/ci/package_uat.py`. Do not invoke that script's full CLI for this local
@@ -227,14 +219,19 @@ your development Mac is Apple Silicon:
 
 1. Ensure the branch on GitHub contains the source changes you want to package.
 2. Open **Actions → uat-macos-intel → Run workflow** and select that branch.
-3. After the Intel job succeeds, download its artifact:
-   - `TrePDF-0.0.x-macos-x64` for macOS 14.4 or newer (Qt 6.12).
-   - `TrePDF-0.0.x-macos-x64-qt6.11` for macOS 13 or newer (Qt 6.11).
-4. Extract the artifact, verify the `.dmg.sha256` checksum, then open the DMG
-   and drag `trepdf.app` onto its Applications shortcut. Eject the image and
-   launch TrePDF from Applications. The artifact also includes a ZIP of the
-   same app. Keep the included notices and `START-HERE.txt` with the package
-   when sharing it; see the [download instructions](github-uat.md#run-and-download).
+3. After the Intel job succeeds, download its DMG directly under **Artifacts**:
+   - `TrePDF-0.0.x-macos-x64.dmg` for macOS 14.4 or newer (Qt 6.12).
+   - `TrePDF-0.0.x-macos-x64-qt6.11.dmg` for macOS 13 or newer (Qt 6.11).
+4. Download the matching `.dmg.sha256` entry to verify the checksum, then open
+   the DMG and drag `trepdf.app` onto its Applications shortcut. There is no
+   outer ZIP to extract for these entries. Eject the image and launch TrePDF
+   from Applications. The artifact without the `.dmg` extension remains a ZIP
+   fallback. The DMG's **Read Me** folder holds the notices and
+   `START-HERE.txt`; keep them with the package when sharing it. See the
+   [download instructions](github-uat.md#run-and-download).
+
+After pushing the direct-download workflow changes, start a new **Run workflow**
+on the updated branch. Re-running an older job retains its old workflow.
 
 This workflow launches only the two Intel jobs. Windows, Apple Silicon and Linux
 remain in the independent `uat` workflow. Each macOS job produces a separate
