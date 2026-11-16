@@ -154,8 +154,9 @@ bool UserFontManager::preparePreview(const QUrl &source, bool bold, bool italic)
     const quint64 revision = ++m_previewRevision;
     const QString style = FontDownloadService::styleName(bold, italic);
     if (source.isEmpty()) {
-        //% "Choose a %1 font file to preview this style."
-        replacePreview({}, qtTrId("UserFontPreviewMissing").arg(style));
+        replacePreview({},
+            //% "Choose a %1 font file to preview this style."
+            qtTrId("UserFontPreviewMissing").arg(style));
         return false;
     }
     QByteArray data;
@@ -183,8 +184,9 @@ bool UserFontManager::preparePreview(const QUrl &source, bool bold, bool italic)
         return false;
     }
     if (!retained) {
-        //% "Could not prepare this font for preview. Choose another file or try again."
-        replacePreview({}, qtTrId("UserFontPreviewFailed"));
+        replacePreview({},
+            //% "Could not prepare this font for preview. Choose another file or try again."
+            qtTrId("UserFontPreviewFailed"));
         return false;
     }
     replacePreview(alias.family, {}, bold, italic);

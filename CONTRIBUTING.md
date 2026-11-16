@@ -140,8 +140,10 @@ for clipped labels and dialog text. New entries should not remain marked
 
 To add a language, register its locale in `I18N_TRANSLATED_LANGUAGES` in
 `CMakeLists.txt`, generate `i18n/qml_<locale>.ts`, and translate the catalog.
-The [language build guide](docs/macos-release-local.md#build-with-another-ui-language)
-explains how the current desktop entry point selects a UI locale.
+Add the supported locale to `src/ApplicationLanguage.h` and expose it in
+`src/Components/LanguageMenuButton.qml`. The
+[UI language guide](docs/macos-release-local.md#build-with-another-ui-language)
+explains runtime selection through Settings and persistence across launches.
 
 ## Open a pull request
 

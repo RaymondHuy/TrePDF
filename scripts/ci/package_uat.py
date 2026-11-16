@@ -48,14 +48,53 @@ def sign_macos_bundle(app: Path) -> None:
 
 
 def create_macos_dmg(stage: Path, destination: Path, version: str) -> None:
-    # Keep the ZIP staging tree unchanged, including its framework symlinks.
+    # Author Finder metadata directly so CI does not need a running Finder.
+    try:
+        from dmgbuild import build_dmg
+        from ds_store import DSStore
+    except ImportError as error:
+        raise RuntimeError(
+            "DMG packaging requires: python -m pip install -r "
+            "scripts/ci/requirements-macos-dmg.txt") from error
+    from importlib.metadata import distribution
+
+    locations = {"trepdf.app": (140, 120), "Applications": (500, 120),
+                 "Read Me": (320, 320)}
     with tempfile.TemporaryDirectory(prefix="trepdf-dmg-") as temporary:
-        contents = Path(temporary) / "contents"
-        subprocess.run(["ditto", str(stage), str(contents)], check=True)
-        (contents / "Applications").symlink_to("/Applications", target_is_directory=True)
-        subprocess.run(["hdiutil", "create", "-volname", f"TrePDF {version}",
-                        "-srcfolder", str(contents), "-fs", "HFS+", "-format", "UDZO",
-                        str(destination)], check=True)
+        # Keep the signed app and ZIP staging tree unchanged. Ancillary files
+        # remain accessible without cluttering the installation row.
+        support = Path(temporary) / "Read Me"
+        support.mkdir()
+        for item in sorted(stage.iterdir()):
+            if item.name != "trepdf.app":
+                subprocess.run(["ditto", str(item), str(support / item.name)], check=True)
+        # The built-in background is redistributed with the image.
+        package = distribution("dmgbuild")
+        notice = next(path for path in package.files if path.name == "LICENSE")
+        license_directory = support / "licenses/dmgbuild"
+        license_directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(package.locate_file(notice), license_directory / "LICENSE")
+        # Do not set hide_extensions: it adds FinderInfo to the signed .app.
+        build_dmg(str(destination), f"TrePDF {version}", settings={
+            "format": "UDZO",
+            "filesystem": "HFS+",
+            "files": [str(stage / "trepdf.app"), str(support)],
+            "symlinks": {"Applications": "/Applications"},
+            "background": "builtin-arrow",
+            "window_rect": ((100, 100), (640, 420)),
+            "default_view": "icon-view",
+            "include_icon_view_settings": True,
+            "arrange_by": None,
+            "grid_spacing": 80,
+            "icon_size": 128,
+            "text_size": 16,
+            "icon_locations": locations,
+            "show_toolbar": False,
+            "show_sidebar": False,
+            "show_status_bar": False,
+            "show_pathbar": False,
+            "show_tab_view": False,
+        })
         subprocess.run(["hdiutil", "verify", str(destination)], check=True)
         mount = Path(temporary) / "mounted"
         mount.mkdir()
@@ -66,6 +105,20 @@ def create_macos_dmg(stage: Path, destination: Path, version: str) -> None:
             shortcut = mount / "Applications"
             if not shortcut.is_symlink() or os.readlink(shortcut) != "/Applications":
                 raise RuntimeError("DMG is missing its Applications shortcut")
+            # Validate the actual image, including copies made by dmgbuild.
+            for source in support.rglob("*"):
+                target = mount / "Read Me" / source.relative_to(support)
+                if source.is_file() and (not target.is_file() or hashlib.sha256(
+                        source.read_bytes()).digest() != hashlib.sha256(target.read_bytes()).digest()):
+                    raise RuntimeError(f"DMG is missing or changed: Read Me/{source.relative_to(support)}")
+            if not (mount / ".background.tiff").is_file():
+                raise RuntimeError("DMG is missing its installation background")
+            with DSStore.open(str(mount / ".DS_Store"), "r") as store:
+                if store["."]["icvp"]["backgroundType"] != 2:
+                    raise RuntimeError("DMG background is not configured")
+                for name, position in locations.items():
+                    if tuple(store[name]["Iloc"]) != position:
+                        raise RuntimeError(f"DMG icon position is incorrect: {name}")
         finally:
             subprocess.run(["hdiutil", "detach", str(mount)], check=True)
 
@@ -247,7 +300,7 @@ def main() -> None:
                 stream.write(f"- `{archive.name}` and `{archive.name}.sha256`\n")
             stream.write("\nRelease build, runtime deployment and startup smoke check passed.\n")
             if args.macos_dmg:
-                stream.write("DMG verification and mounted app signature check passed.\n")
+                stream.write("DMG verification, Finder layout and mounted app signature check passed.\n")
 
 
 if __name__ == "__main__":

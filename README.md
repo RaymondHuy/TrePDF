@@ -64,7 +64,9 @@ for macOS 14.4+, with Qt 6.11 variants targeting macOS 13+.
 
 For test packages, follow the [manual UAT guide](docs/github-uat.md). It explains
 how to run a workflow and download its artifacts. Each macOS job provides a
-drag-to-install `.dmg` and a `.zip`, with separate SHA-256 files. These workflows
+direct-download `.dmg` artifact and a separate `.dmg.sha256` artifact, plus a
+ZIP fallback. The DMG opens with the app on the left and an arrow pointing to
+Applications on the right; drag the app across to install it. These workflows
 do not publish GitHub Releases or run the full feature test suite. Current
 macOS test packages use ad-hoc signing and are not notarized.
 
@@ -200,10 +202,13 @@ boundaries when adding features; see [Contributing](CONTRIBUTING.md#work-in-the-
 
 ## Localization
 
-The desktop UI currently defaults to Vietnamese. Catalogs for English,
-Vietnamese, Croatian, and Thai live in `i18n/qml_<locale>.ts`.
-The locale is selected in `src/main.cpp`; there is currently no build-time
-language option. See [building with another UI language](docs/macos-release-local.md#build-with-another-ui-language).
+The desktop UI defaults to Vietnamese. Choose **Settings → Language** to switch
+between **Tiếng Việt**, **English**, **Hrvatski**, **ไทย**, **Français**,
+**Deutsch**, **Español**, **Português (Brasil)**, **日本語**, **简体中文**,
+**한국어**, and **Bahasa Indonesia** immediately. TrePDF remembers the selection
+for the next launch; no rebuild or download is needed.
+All twelve catalogs are bundled from `i18n/qml_<locale>.ts`. See
+[UI language settings](docs/macos-release-local.md#build-with-another-ui-language).
 
 Use Qt's ID-based translations: `qsTrId()` in QML and `qtTrId()` in C++, with
 stable PascalCase IDs and English source comments. After changing UI strings:
@@ -215,8 +220,9 @@ cmake --build build --target trepdf trepdf_qmllint --parallel 4
 ```
 
 To add a language, register it in `I18N_TRANSLATED_LANGUAGES` in
-`CMakeLists.txt`, generate and translate its catalog, and select the locale in
-the entry point. Preserve placeholders such as `%1` and `%n`. See the
+`CMakeLists.txt`, generate and translate its catalog, and add the locale to
+`src/ApplicationLanguage.h` and `src/Components/LanguageMenuButton.qml`.
+Preserve placeholders such as `%1` and `%n`. See the
 [translation contribution guide](CONTRIBUTING.md#translate-the-interface).
 
 ## Contributing

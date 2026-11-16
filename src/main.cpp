@@ -1,4 +1,5 @@
 #include "ApplicationFonts.h"
+#include "ApplicationLanguage.h"
 #include "PDFFileOpenHandler.h"
 #include "platform/PlatformService.h"
 
@@ -60,7 +61,7 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QQmlApplicationEngine engine;
-    engine.setUiLanguage(QStringLiteral("vi"));
+    ApplicationLanguage::initialize(engine);
     QObject::connect(
         &engine,
         &QQmlApplicationEngine::objectCreationFailed,

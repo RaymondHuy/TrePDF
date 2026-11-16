@@ -4765,12 +4765,12 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
     </message>
     <message id="UserFontPreviewMissing">
         <location filename="../src/UserFontManager.cpp" line="158"/>
-        <source></source>
+        <source>Choose a %1 font file to preview this style.</source>
         <translation>Chọn file phông chữ %1 để xem thử kiểu này.</translation>
     </message>
     <message id="UserFontPreviewFailed">
         <location filename="../src/UserFontManager.cpp" line="187"/>
-        <source></source>
+        <source>Could not prepare this font for preview. Choose another file or try again.</source>
         <translation>Không thể xem thử phông chữ này. Hãy chọn file khác hoặc thử lại.</translation>
     </message>
     <message id="OCRSaveFirstHint">
@@ -5689,6 +5689,71 @@ Tiếng Việt: Nguyễn Ánh — 0123456789</translation>
         <location filename="../src/Components/TableCellPanel.qml" line="291"/>
         <source>Go to cell</source>
         <translation>Chuyển đến ô</translation>
+    </message>
+    <message id="UiLanguageMenu">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="12"/>
+        <source>Language</source>
+        <translation>Ngôn ngữ</translation>
+    </message>
+    <message id="UiLanguageVietnamese">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="94"/>
+        <source>Vietnamese</source>
+        <translation>Tiếng Việt</translation>
+    </message>
+    <message id="UiLanguageEnglish">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="100"/>
+        <source>English</source>
+        <translation>English</translation>
+    </message>
+    <message id="UiLanguageCroatian">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="106"/>
+        <source>Croatian</source>
+        <translation>Hrvatski</translation>
+    </message>
+    <message id="UiLanguageThai">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="112"/>
+        <source>Thai</source>
+        <translation>ไทย</translation>
+    </message>
+    <message id="UiLanguageFrench">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="119"/>
+        <source>French</source>
+        <translation>Français</translation>
+    </message>
+    <message id="UiLanguageGerman">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="125"/>
+        <source>German</source>
+        <translation>Deutsch</translation>
+    </message>
+    <message id="UiLanguageSpanish">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="134"/>
+        <source>Spanish</source>
+        <translation>Español</translation>
+    </message>
+    <message id="UiLanguagePortugueseBrazil">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="140"/>
+        <source>Portuguese (Brazil)</source>
+        <translation>Português (Brasil)</translation>
+    </message>
+    <message id="UiLanguageJapanese">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="146"/>
+        <source>Japanese</source>
+        <translation>日本語</translation>
+    </message>
+    <message id="UiLanguageChineseSimplified">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="152"/>
+        <source>Chinese (Simplified)</source>
+        <translation>简体中文</translation>
+    </message>
+    <message id="UiLanguageKorean">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="158"/>
+        <source>Korean</source>
+        <translation>한국어</translation>
+    </message>
+    <message id="UiLanguageIndonesian">
+        <location filename="../src/Components/LanguageMenuButton.qml" line="164"/>
+        <source>Indonesian</source>
+        <translation>Bahasa Indonesia</translation>
     </message>
 </context>
 </TS>

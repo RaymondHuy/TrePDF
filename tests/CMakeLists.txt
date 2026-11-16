@@ -420,3 +420,18 @@ add_test(NAME OCRLanguageManagerTests COMMAND trepdf_ocr_language_tests)
 if(WIN32 AND NOT TREPDF_DEPLOY_RUNTIME)
     trepdf_deploy_windows_runtime(trepdf_ocr_language_tests)
 endif()
+
+qt_add_executable(trepdf_application_language_tests tst_ApplicationLanguage.cpp)
+target_include_directories(trepdf_application_language_tests PRIVATE ../src)
+target_link_libraries(trepdf_application_language_tests PRIVATE
+    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Test
+)
+target_compile_definitions(trepdf_application_language_tests PRIVATE
+    TREPDF_LANGUAGE_QM_DIR="${CMAKE_BINARY_DIR}"
+)
+add_dependencies(trepdf_application_language_tests release_translations)
+add_test(NAME ApplicationLanguageTests COMMAND trepdf_application_language_tests)
+set_tests_properties(ApplicationLanguageTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+if(WIN32 AND NOT TREPDF_DEPLOY_RUNTIME)
+    trepdf_deploy_windows_runtime(trepdf_application_language_tests)
+endif()
