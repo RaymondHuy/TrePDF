@@ -156,6 +156,8 @@ jobs:
           package_options=()
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             package_options+=(--macos-dmg)
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            package_options+=(--no-archive)
           fi
           python scripts/ci/package_uat.py \
             --platform "$TREPDF_PLATFORM" --version "$TREPDF_VERSION" \
@@ -181,7 +183,18 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload Windows application folder
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
+          path: build/stage/TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
       - name: Upload package
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
