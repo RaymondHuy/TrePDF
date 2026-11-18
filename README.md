@@ -127,8 +127,9 @@ or a drag-to-install `.dmg`, see the [local macOS Release guide](docs/macos-rele
 
 ### Other desktop builds and local packages
 
-The local scripts use installed tools, prepare native dependencies, and create
-Release ZIP packages with checksums. The first run needs network access for
+The local scripts use installed tools and prepare native dependencies. Windows
+produces a runnable Release application folder; macOS creates a Release ZIP
+with a checksum. The first run needs network access for
 pinned dependency downloads. The check commands below validate local tools
 without downloading dependencies or building the app.
 
@@ -148,8 +149,12 @@ SDK, a Qt MSVC x64 kit, Python 3.12+, CMake, and Ninja. Replace the example Qt p
 .\pipelines\build-windows.ps1 -QtRoot 'C:\Qt\6.12.0\msvc2022_64'
 ```
 
-Packages are written under `artifacts/local/<platform>/`. These scripts build
-Release packages with tests disabled. For Linux or custom toolchains, use the
+Windows output is `artifacts/local/windows-x64/TrePDF-<version>-windows-x64/`.
+Run `bin/trepdf.exe` inside it and keep the entire folder together with its
+deployed libraries and resources. The Windows script creates no ZIP or archive
+checksum. macOS packages remain under `artifacts/local/<platform>/`.
+These scripts build Release applications with tests disabled. For Linux or custom
+toolchains, use the
 dependency preparation and configure steps in [the UAT workflow](.github/workflows/uat.yml).
 Pass the prepared `PDFium_ROOT`, `QPDF_ROOT`, and `OCR_ROOT` explicitly to CMake.
 The [UAT guide](docs/github-uat.md) describes platform requirements and outputs;

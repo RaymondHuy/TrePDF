@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the deployed UAT application and archive it with its build metadata."""
+"""Verify a deployed UAT application, add metadata, and optionally archive it."""
 
 from __future__ import annotations
 
@@ -178,6 +178,8 @@ def main() -> None:
                         help="Optional archive suffix, for example qt6.11")
     parser.add_argument("--macos-dmg", action="store_true",
                         help="Also create and verify a drag-to-install macOS DMG")
+    parser.add_argument("--no-archive", action="store_true",
+                        help="Verify the deployed Windows application folder without creating a ZIP")
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--dependencies", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -188,6 +190,8 @@ def main() -> None:
         parser.error("Package variant must contain only lowercase letters, digits, dots or hyphens")
     if args.macos_dmg and args.platform not in MACOS_ARCHITECTURES:
         parser.error("--macos-dmg requires a macOS platform")
+    if args.no_archive and args.platform != "windows-x64":
+        parser.error("--no-archive requires the windows-x64 platform")
     package = args.platform + (f"-{args.variant}" if args.variant else "")
     stage = args.stage.resolve()
     manifest = json.loads((args.dependencies / "manifest.json").read_text(encoding="utf-8"))
@@ -262,6 +266,16 @@ def main() -> None:
             destination = stage / "licenses/libxlsxwriter"
             destination.mkdir(parents=True, exist_ok=True)
             shutil.copy2(notice, destination / filename)
+
+    if args.no_archive:
+        print(f"Application folder ready: {stage}\nRun: {executable}", flush=True)
+        if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(summary, "a", encoding="utf-8") as stream:
+                stream.write(f"### TrePDF {args.version} — {package}\n\n")
+                stream.write("- Deployed application folder; launch `bin/trepdf.exe`.\n")
+                stream.write("- No package ZIP or archive checksum was created.\n\n")
+                stream.write("Release build, runtime deployment and startup smoke check passed.\n")
+        return
 
     args.output.mkdir(parents=True, exist_ok=True)
     archive_base = args.output.resolve() / f"TrePDF-{args.version}-{package}"
