@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Build and package TrePDF locally for Windows x64, using installed tools.
+Build and deploy TrePDF locally for Windows x64, using installed tools.
 .DESCRIPTION
 Requires 64-bit PowerShell, Visual Studio 2022 or 2026 C++ tools + Windows SDK,
 Qt 6.8+ MSVC x64 (QML, Quick Controls, LinguistTools, ShaderTools,
@@ -10,7 +10,8 @@ Defaults to E:\Qt\6.12.0\msvc2022_64 when installed. Override with -QtRoot
 or QT_ROOT_DIR; otherwise falls back to qmake.exe on PATH.
 Does not install Qt, Node.js or build tools. The first run downloads and
 builds the pinned PDF/OCR dependencies; later runs reuse their manifest.
-Output: artifacts/local/windows-x64/*.zip and *.sha256.
+Output: artifacts/local/windows-x64/TrePDF-<version>-windows-x64/.
+Launch bin/trepdf.exe inside that folder. No ZIP or archive checksum is created.
 Without -Version / TREPDF_VERSION, increments the highest local 0.0.x output
 or staging folder, including incomplete builds. Existing output is never replaced.
 .EXAMPLE
@@ -149,10 +150,11 @@ if (-not $Version) {
     $Version = "0.0.$($patch + 1)"
 }
 if ($Version -notmatch '^0\.0\.[1-9][0-9]*$') { throw 'Version must be 0.0.x, with x >= 1.' }
-$Archive = Join-Path $Output "TrePDF-$Version-$Platform.zip"
-$Stage = Join-Path $StageRoot "TrePDF-$Version-$Platform"
-if ((Test-Path -LiteralPath $Archive) -or (Test-Path -LiteralPath "$Archive.sha256") -or
-        (Test-Path -LiteralPath $Stage)) {
+$LegacyArchive = Join-Path $Output "TrePDF-$Version-$Platform.zip"
+$LegacyStage = Join-Path $StageRoot "TrePDF-$Version-$Platform"
+$Stage = Join-Path $Output "TrePDF-$Version-$Platform"
+if ((Test-Path -LiteralPath $LegacyArchive) -or (Test-Path -LiteralPath "$LegacyArchive.sha256") -or
+        (Test-Path -LiteralPath $LegacyStage) -or (Test-Path -LiteralPath $Stage)) {
     throw "Version $Version already has output or a stage folder. Choose a new -Version."
 }
 $Kit = "$Platform-qt$QtVersion"
@@ -160,7 +162,7 @@ $Dependencies = Join-Path $Repo "_deps/local/$Kit"
 $ManifestPath = Join-Path $Dependencies 'manifest.json'
 $Build = Join-Path $Repo "build/local/$Kit"
 Write-Host "TrePDF $Version | $Platform | Qt $QtVersion | $Parallel build jobs"
-Write-Host "Build: $Build`nDependencies: $Dependencies`nPackage: $Archive"
+Write-Host "Build: $Build`nDependencies: $Dependencies`nApplication folder: $Stage"
 if ($CheckOnly) {
     Invoke-Checked 'cmake.exe' @('--version')
     Invoke-Checked 'ninja.exe' @('--version')
@@ -176,8 +178,8 @@ try {
     throw "Cannot acquire build lock $LockPath. Another Windows build may be running. $($_.Exception.Message)"
 }
 try {
-    if ((Test-Path -LiteralPath $Archive) -or (Test-Path -LiteralPath "$Archive.sha256") -or
-            (Test-Path -LiteralPath $Stage)) {
+    if ((Test-Path -LiteralPath $LegacyArchive) -or (Test-Path -LiteralPath "$LegacyArchive.sha256") -or
+            (Test-Path -LiteralPath $LegacyStage) -or (Test-Path -LiteralPath $Stage)) {
         throw 'Output appeared while acquiring the build lock; run again for the next version.'
     }
     New-Item -ItemType Directory -Path $Output -Force | Out-Null
@@ -210,8 +212,9 @@ try {
     Invoke-Checked 'cmake.exe' @('--install', $Build, '--config', 'Release', '--prefix', $Stage)
     Invoke-Checked $Python ($PythonArgs + @((Join-Path $Repo 'scripts/ci/package_uat.py'),
         '--platform', $Platform, '--version', $Version, '--stage', $Stage,
-        '--dependencies', $Dependencies, '--output', $Output))
-    Write-Host "Ready: $Archive"
+        '--dependencies', $Dependencies, '--output', $Output, '--no-archive'))
+    Write-Host "Ready: $Stage"
+    Write-Host "Run: $(Join-Path $Stage 'bin/trepdf.exe')"
 } finally {
     $BuildLock.Dispose()
 }

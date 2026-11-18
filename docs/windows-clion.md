@@ -125,10 +125,17 @@ Windows SDK. Python 3.12+ x64, CMake and Ninja must be available on PATH.
 .\pipelines\build-windows.ps1
 ```
 
-The script prepares its own MSVC PDF/OCR dependencies and writes packages
-under `artifacts/local/windows-x64/`. Its build and dependencies are separated
-by Qt version under `build/local/` and `_deps/local/`, independently of the
-CLion MinGW preset.
+The script prepares its own MSVC PDF/OCR dependencies and deploys the application
+to `artifacts/local/windows-x64/TrePDF-<version>-windows-x64/`. Open
+`bin/trepdf.exe` inside that folder. Keep the complete folder together, including
+Qt/PDF libraries, plugins, OCR data, licenses, `VERSION`, and `build-info.json`.
+The script checks startup before reporting success and creates no ZIP or archive
+checksum. Its build and dependencies are separated by Qt version under
+`build/local/` and `_deps/local/`, independently of the CLion MinGW preset.
+
+Automatic versions still account for existing application folders, older ZIP
+outputs, and old `build/local-stage/windows-x64/` folders. Existing versions
+are not overwritten, including folders left by an interrupted build.
 
 ## Saving an open PDF on Windows
 

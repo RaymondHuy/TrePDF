@@ -7,7 +7,7 @@ the two Intel macOS packages. Run either workflow independently:
 
 | Workflow | Package | GitHub runner | Toolchain | Output |
 | --- | --- | --- | --- | --- |
-| `uat` | `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | `.zip`, launch `bin/trepdf.exe` |
+| `uat` | `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | Application-folder artifact, launch `bin/trepdf.exe` |
 | `uat` | `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.dmg` and `.zip` |
 | `uat` | `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.dmg` and `.zip` |
 | `uat-macos-intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.dmg` and `.zip` |
@@ -57,10 +57,16 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
 The `TrePDF-0.0.x-<package>` artifact without a filename extension remains the
 ZIP fallback on macOS: extract that artifact, then the package ZIP inside it.
 It contains the ZIP and its checksum, while the DMG and DMG checksum have their
-own entries. On Windows and Linux, download this package artifact and extract
-the platform archive before launching the app.
+own entries. On Linux, download this package artifact and extract the platform
+archive before launching the app.
 
-Direct DMG downloads apply to new runs of the updated workflow. After pushing
+On Windows, download `TrePDF-0.0.x-windows-x64` and extract the GitHub artifact
+once, then run `bin/trepdf.exe`. The workflow uploads the deployed application
+folder directly, so there is no second package ZIP or archive checksum inside.
+GitHub's artifact download still wraps the folder in a ZIP. Keep all extracted
+libraries, plugins and resources together with the executable.
+
+These packaging changes apply to new runs of the updated workflow. After pushing
 these changes, choose **Run workflow** and the updated branch. **Re-run jobs**
 on an older run uses that run's old workflow and retains its previous packaging.
 See GitHub's [re-run behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
@@ -96,7 +102,7 @@ to increment it. This follows GitHub's
 [workflow run-number semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/variables).
 
 The version is passed to CMake and embedded in the application, macOS bundle
-and Windows executable metadata. It is also recorded in the archive name,
+and Windows executable metadata. It is also recorded in the output folder/archive name,
 `VERSION`, and `build-info.json` alongside the source commit and dependency
 versions. Each Qt 6.11 package uses distinct names for its staging directory,
 artifact, ZIP, DMG and checksums; its metadata records `qt: 6.11.0` and
@@ -128,6 +134,13 @@ The Linux launcher supplies its bundled library directory for transitive
 dependencies. The archives include dependency notices and build metadata;
 macOS uses `ditto` and Linux uses tar to preserve permissions and symlinks.
 The workflow pins third-party Actions to commit SHAs.
+
+Windows passes `--no-archive` to `package_uat.py`. OCR validation, startup
+verification, dependency notices and build metadata are retained in the deployed
+folder. The workflow uploads that folder with compression disabled, without
+creating an additional package ZIP or `.sha256` file. The local
+`pipelines/build-windows.ps1` uses the same mode and leaves its runnable folder
+under `artifacts/local/windows-x64/`.
 
 `uat`, `uat-macos-intel` and `uat-ipad` use Node.js 24 releases of Checkout, Setup Python
 and Upload Artifact. Desktop Qt installation also uses a Node.js 24 action;
