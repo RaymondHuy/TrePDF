@@ -19,6 +19,8 @@ import urllib.error
 import urllib.request
 import zipfile
 
+from macos_compat import verify_binary, version_tuple
+
 
 PDFIUM_VERSION = "157.0.8100.0"
 PDFIUM_BASE = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8100/"
@@ -38,6 +40,20 @@ PDFIUM_PACKAGES = {
     "linux-x64": (
         "pdfium-v8-linux-x64.tgz",
         "78a68e46d871a52599c98af31a30a433f5441e670c03bba1f6b7a8444d645782",
+    ),
+}
+# PDFium 157 requires macOS 13. The compatibility jobs use this verified
+# macOS 12 build with the same public APIs needed by TrePDF.
+PDFIUM_MACOS12_VERSION = "151.0.7920.0"
+PDFIUM_MACOS12_BASE = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7920/"
+PDFIUM_MACOS12_PACKAGES = {
+    "macos-arm64": (
+        "pdfium-v8-mac-arm64.tgz",
+        "23a5208e5c41abd6200e42bd1278026d3b0b45013fec3d4f64ec5be4f1513171",
+    ),
+    "macos-x64": (
+        "pdfium-v8-mac-x64.tgz",
+        "bd181e0cbff5c1fd6c30c97dde2adfddba69d5836212f49de1b7f832277de772",
     ),
 }
 QPDF_VERSION = "12.4.1"
@@ -158,13 +174,24 @@ def checked_in_qpdf(repo: Path) -> Path:
     return source
 
 
-def macos_intel_qpdf_options(directory: Path) -> list[str]:
-    # Use a pinned static JPEG and the system zlib so the Intel package never
+def pdfium_package(target: str) -> tuple[str, str, str, str]:
+    if target.startswith("macos-"):
+        minimum = version_tuple(os.environ["MACOS_DEPLOYMENT_TARGET"])
+        if minimum < (12, 0, 0):
+            raise RuntimeError("TrePDF's pinned PDFium packages require macOS 12 or newer")
+        if minimum < (13, 0, 0):
+            return (PDFIUM_MACOS12_VERSION, PDFIUM_MACOS12_BASE,
+                    *PDFIUM_MACOS12_PACKAGES[target])
+    return PDFIUM_VERSION, PDFIUM_BASE, *PDFIUM_PACKAGES[target]
+
+
+def macos_qpdf_options(directory: Path, target: str) -> list[str]:
+    # Use a pinned static JPEG and the system zlib so the package never
     # depends on a runner's Homebrew installation or its deployment target.
     sdk = Path(subprocess.check_output(
         ["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip())
     common = [
-        "-DCMAKE_OSX_ARCHITECTURES=x86_64",
+        f"-DCMAKE_OSX_ARCHITECTURES={'arm64' if target == 'macos-arm64' else 'x86_64'}",
         f"-DCMAKE_OSX_SYSROOT={sdk}",
         f"-DCMAKE_OSX_DEPLOYMENT_TARGET={os.environ['MACOS_DEPLOYMENT_TARGET']}",
     ]
@@ -195,7 +222,8 @@ def macos_intel_qpdf_options(directory: Path) -> list[str]:
 
 
 def prepare_qpdf(target: str, directory: Path, repo: Path) -> Path:
-    if target == "macos-arm64":
+    if (target == "macos-arm64"
+            and version_tuple(os.environ["MACOS_DEPLOYMENT_TARGET"]) >= (13, 0, 0)):
         prefix = directory / "qpdf"
         shutil.copytree(checked_in_qpdf(repo), prefix, dirs_exist_ok=True, symlinks=True)
         notices = prefix
@@ -216,7 +244,7 @@ def prepare_qpdf(target: str, directory: Path, repo: Path) -> Path:
         source = directory / "sources" / f"qpdf-{QPDF_VERSION}"
         build = directory / "build-qpdf"
         prefix = directory / "qpdf"
-        options = macos_intel_qpdf_options(directory) if target == "macos-x64" else []
+        options = macos_qpdf_options(directory, target) if target.startswith("macos-") else []
         run("cmake", "-S", source, "-B", build, "-G", "Ninja",
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={prefix}",
             "-DCMAKE_INSTALL_LIBDIR=lib", "-DBUILD_SHARED_LIBS=ON",
@@ -229,7 +257,7 @@ def prepare_qpdf(target: str, directory: Path, repo: Path) -> Path:
         run("cmake", "--build", build, "--target", "libqpdf", "--parallel", "4")
         for component in ("lib", "dev"):
             run("cmake", "--install", build, "--component", component)
-        if target == "macos-x64":
+        if target.startswith("macos-"):
             # Match the unversioned filename copied into TrePDF.app by CMake.
             run("install_name_tool", "-id", "@rpath/libqpdf.dylib",
                 prefix / "lib/libqpdf.dylib")
@@ -276,21 +304,26 @@ def main() -> None:
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     repo = Path(__file__).resolve().parents[2]
-    package, checksum = PDFIUM_PACKAGES[args.platform]
-    archive = download(PDFIUM_BASE + package, checksum,
-                       directory / "downloads" / f"pdfium-{PDFIUM_VERSION}")
+    pdfium_version, pdfium_base, package, checksum = pdfium_package(args.platform)
+    archive = download(pdfium_base + package, checksum,
+                       directory / "downloads" / f"pdfium-{pdfium_version}")
     pdfium = directory / "pdfium"
     extract(archive, pdfium)
+    if args.platform.startswith("macos-"):
+        verify_binary(pdfium / "lib/libpdfium.dylib",
+                      "arm64" if args.platform == "macos-arm64" else "x86_64",
+                      os.environ["MACOS_DEPLOYMENT_TARGET"])
     copy_notices(pdfium, directory / "licenses/pdfium", ("LICENSE",))
     shutil.copytree(pdfium / "licenses", directory / "licenses/pdfium/third-party",
                     dirs_exist_ok=True)
     roots = {"PDFium_ROOT": str(pdfium),
              "QPDF_ROOT": str(prepare_qpdf(args.platform, directory, repo))}
-    versions = {"pdfium": PDFIUM_VERSION, "qpdf": QPDF_VERSION}
+    versions = {"pdfium": pdfium_version, "qpdf": QPDF_VERSION}
     if args.platform == "windows-x64":
         roots["ZLIB_ROOT"] = str(prepare_zlib(directory))
         versions["zlib"] = ZLIB_VERSION
-    elif args.platform == "macos-x64":
+    elif (args.platform == "macos-x64" or (args.platform == "macos-arm64"
+            and version_tuple(os.environ["MACOS_DEPLOYMENT_TARGET"]) < (13, 0, 0))):
         versions["libjpeg-turbo"] = JPEG_VERSION
     ocr = directory / "ocr"
     ocr_options = ["--zlib-root", roots["ZLIB_ROOT"]] if args.platform == "windows-x64" else []
@@ -309,6 +342,8 @@ def main() -> None:
         "versions": versions,
         "license_dirs": {name: str(directory / "licenses" / name) for name in versions},
     }
+    if args.platform.startswith("macos-"):
+        manifest["macos_deployment_target"] = os.environ["MACOS_DEPLOYMENT_TARGET"]
     (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     if env_file := os.environ.get("GITHUB_ENV"):
         with open(env_file, "a", encoding="utf-8") as stream:

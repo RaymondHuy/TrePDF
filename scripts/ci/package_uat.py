@@ -8,10 +8,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import subprocess
 import tempfile
+
+from macos_compat import verify_tree, version_tuple
 
 
 MACOS_ARCHITECTURES = {"macos-arm64": "arm64", "macos-x64": "x86_64"}
@@ -226,12 +229,23 @@ def main() -> None:
         executable = launcher
 
     if args.platform in MACOS_ARCHITECTURES:
-        subprocess.run(["lipo", str(executable), "-verify_arch",
-                        MACOS_ARCHITECTURES[args.platform]], check=True)
+        deployment_target = manifest.get("macos_deployment_target") or os.environ.get("MACOS_DEPLOYMENT_TARGET")
+        if not deployment_target:
+            raise RuntimeError("Missing macOS deployment target; prepare dependencies again")
+        configured_target = os.environ.get("MACOS_DEPLOYMENT_TARGET", deployment_target)
+        if version_tuple(configured_target) != version_tuple(deployment_target):
+            raise RuntimeError("Dependency and application macOS deployment targets differ")
+        with (stage / "trepdf.app/Contents/Info.plist").open("rb") as stream:
+            app_target = plistlib.load(stream).get("LSMinimumSystemVersion", "")
+        if version_tuple(app_target) != version_tuple(deployment_target):
+            raise RuntimeError("Bundle minimum macOS version does not match its deployment target")
+        verify_tree(stage / "trepdf.app", MACOS_ARCHITECTURES[args.platform], deployment_target)
         sign_macos_bundle(stage / "trepdf.app")
         processor = "Apple Silicon" if args.platform == "macos-arm64" else "Intel"
         (stage / "START-HERE.txt").write_text(
             f"TrePDF UAT for macOS ({processor})\n\n"
+            f"Minimum macOS: {deployment_target}\n"
+            f"Qt: {os.environ.get('QT_VERSION', 'local')}\n\n"
             "This build has an ad-hoc integrity signature, without Apple notarization.\n"
             "After verifying the package SHA-256, open the DMG and drag trepdf.app\n"
             "to Applications, or extract the ZIP and open trepdf.app.\n"
@@ -256,6 +270,7 @@ def main() -> None:
     }
     if args.platform in MACOS_ARCHITECTURES:
         metadata["macos_signing"] = "ad-hoc; not notarized"
+        metadata["macos_deployment_target"] = deployment_target
     (stage / "build-info.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     shutil.copytree(args.dependencies / "licenses", stage / "licenses", dirs_exist_ok=True)

@@ -15,6 +15,7 @@ import zipfile
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "package_uat.py"
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("package_uat", SCRIPT)
 package_uat = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(package_uat)

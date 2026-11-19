@@ -3,15 +3,18 @@
 The [`uat` workflow](../.github/workflows/uat.yml) builds Windows, Apple Silicon
 and Linux Release packages. The separate
 [`uat-macos-intel` workflow](../.github/workflows/uat-macos-intel.yml) builds only
-the two Intel macOS packages. Run either workflow independently:
+the Intel macOS packages. Run either workflow independently; all SDKs and
+native dependencies are prepared on GitHub, with no local build required:
 
 | Workflow | Package | GitHub runner | Toolchain | Output |
 | --- | --- | --- | --- | --- |
 | `uat` | `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | Application-folder artifact, launch `bin/trepdf.exe` |
 | `uat` | `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.dmg` and `.zip` |
 | `uat` | `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.dmg` and `.zip` |
+| `uat` | `macos-arm64-qt6.8` | `macos-15` | Apple Clang, Qt 6.8.3 | `.dmg` and `.zip` |
 | `uat-macos-intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.dmg` and `.zip` |
 | `uat-macos-intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.dmg` and `.zip` |
+| `uat-macos-intel` | `macos-x64-qt6.8` | `macos-15-intel` | Apple Clang x86_64, Qt 6.8.3 | `.dmg` and `.zip` |
 | `uat` | `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
 
 Choose `macos-arm64` for Apple Silicon (M1 or newer), or `macos-x64` for Intel
@@ -20,8 +23,17 @@ matching [Qt 6.12 supported platforms](https://doc.qt.io/qt-6.12/supported-platf
 For macOS 13 or macOS 14.0–14.3, choose the matching architecture's `-qt6.11`
 package. These target macOS 13.0 and also run on newer macOS versions, matching
 [Qt 6.11 supported platforms](https://doc.qt.io/qt-6.11/supported-platforms.html).
-The macOS packages do not support macOS 12 or earlier and are not universal
-binaries. Intel jobs run natively on GitHub's
+For macOS 12, the `-qt6.8` variants target **macOS 12.0**.
+[Qt 6.8 supports macOS 12+](https://doc.qt.io/qt-6.8/supported-platforms.html).
+These jobs use the public Qt 6.8.3 SDK and do not require a commercial Qt account.
+The minimum supported Qt version for building TrePDF is 6.8.
+
+These are beta compatibility builds. A successful GitHub run verifies build,
+deployment, binary minimum-OS metadata and startup on macOS 15; it does not
+replace feature testing on an actual macOS 12 machine. Test text editing,
+Save/reopen, forms, OCR and table export before distributing them widely.
+All macOS packages are separate architecture builds, not universal binaries.
+Intel jobs run natively on GitHub's
 [`macos-15-intel` runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 The Linux package targets Ubuntu 24.04
 or a compatible newer desktop distribution; system glibc and graphics libraries
@@ -39,7 +51,9 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
 3. On macOS, download the `TrePDF-0.0.x-<package>.dmg` entry under **Artifacts**
    in that workflow run. This downloads the DMG directly, with no outer ZIP to
    extract. For an Intel Mac, choose `TrePDF-0.0.x-macos-x64.dmg` (macOS 14.4+)
-   or `TrePDF-0.0.x-macos-x64-qt6.11.dmg` (macOS 13+). The matching
+   or `TrePDF-0.0.x-macos-x64-qt6.11.dmg` (macOS 13+). For macOS 12, choose
+   the `-qt6.8.dmg` package for your architecture, for example
+   `TrePDF-0.0.x-macos-arm64-qt6.8.dmg` on Apple Silicon. The matching
    `.dmg.sha256` entry is a separate direct download for checksum verification.
 4. To verify the DMG, save its `.dmg.sha256` file in the same directory and run
    the following command there, replacing the filename with your package:
@@ -71,8 +85,8 @@ these changes, choose **Run workflow** and the updated branch. **Re-run jobs**
 on an older run uses that run's old workflow and retains its previous packaging.
 See GitHub's [re-run behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
-There are no automatic push, pull-request or schedule triggers. `uat` runs four
-jobs; `uat-macos-intel` runs two. Neither workflow triggers the other. Within
+There are no automatic push, pull-request or schedule triggers. `uat` runs five
+jobs. Each workflow runs its configured matrix independently. Within
 each workflow, a failed matrix job does not cancel its siblings. Artifacts
 are retained for 30 days, subject to repository policy. Both workflows only need
 `contents: read`; no custom secret, tag write or release publication is required.
@@ -104,9 +118,9 @@ to increment it. This follows GitHub's
 The version is passed to CMake and embedded in the application, macOS bundle
 and Windows executable metadata. It is also recorded in the output folder/archive name,
 `VERSION`, and `build-info.json` alongside the source commit and dependency
-versions. Each Qt 6.11 package uses distinct names for its staging directory,
-artifact, ZIP, DMG and checksums; its metadata records `qt: 6.11.0` and
-`variant: qt6.11`.
+versions. Each alternate Qt package uses distinct names for its staging
+directory, artifact, ZIP, DMG and checksums; for example, Qt 6.8 metadata records
+`qt: 6.8.3`, `variant: qt6.8` and `macos_deployment_target: 12.0`.
 Each macOS job uses native PDF dependencies matching its architecture.
 The build does not commit a version bump back to the repository.
 Local builds keep the default `0.1.0` unless `-DTREPDF_VERSION=...` is supplied.
@@ -114,12 +128,17 @@ Local builds keep the default `0.1.0` unless `-DTREPDF_VERSION=...` is supplied.
 ## Dependencies and packaging
 
 [`prepare_dependencies.py`](../scripts/ci/prepare_dependencies.py) requires
-Python 3.12 or newer. It downloads PDFium 157.0.8100.0 and verifies SHA-256 for
-each platform. Desktop and iOS downloads use `downloads/pdfium-<version>/`
+Python 3.12 or newer. It downloads PDFium 157.0.8100.0 for current platforms,
+or the checksum-pinned **151.0.7920.0** V8 package for macOS 12 targets.
+Both ARM64 and Intel compatibility libraries were checked for a 12.0 Mach-O
+deployment target and the public APIs used by TrePDF. The older PDFium pin is
+confined to these compatibility jobs; do not downgrade current builds.
+Every download is SHA-256 verified. Desktop and iOS downloads use `downloads/pdfium-<version>/`
 so cached archives from an earlier release do not block an upgrade.
-qpdf 12.4.1 uses the checked-in macOS ARM64 package, the official
-MSVC package on Windows, and a source build on Linux and Intel macOS. Intel
-builds use pinned static libjpeg-turbo 3.1.2 and the macOS SDK's system zlib,
+qpdf 12.4.1 uses the checked-in macOS ARM64 package for targets 13+, the official
+MSVC package on Windows, and a source build on Linux, Intel macOS and ARM64
+macOS 12. The macOS source builds use pinned static libjpeg-turbo 3.1.2 and the
+macOS SDK's system zlib,
 with the same architecture and deployment target as the app. Windows builds
 static zlib 1.3.1. libxlsxwriter is built from the vendored source.
 
@@ -149,8 +168,11 @@ instead of a JavaScript action. This runtime belongs to GitHub's build runner,
 is not bundled with TrePDF, and does not change the macOS deployment targets
 or require Node.js on the end user's computer.
 
-Qt 6.12 also needs the `qttasktree` module for its QML dependencies. Windows
-uses aqtinstall pinned to upstream commit
+Qt 6.12 also needs the `qttasktree` module for its QML dependencies. The Qt 6.8
+matrix rows install only `qtshadertools qtimageformats`; TaskTree is
+not available in that repository. All supported builds use the public
+QSGTextNode API and the standard Qt 6.8 translation and popup APIs.
+Windows uses aqtinstall pinned to upstream commit
 `076e1659807d0b362a3ed684d54c2e9c775eb9c7`, which understands Qt's split
 Windows repositories; released aqtinstall 3.3.0 cannot resolve those packages.
 macOS, Linux and the iPad workflow retain aqtinstall 3.3.0. Both macOS
@@ -163,8 +185,12 @@ the complete resource seal with `codesign --verify --deep --strict`, creates the
 ZIP, extracts it again, and repeats verification and startup on the extracted
 app. This catches incomplete linker signatures and signatures invalidated by
 library deployment before uploading an artifact.
-Packaging also checks that the app executable contains the requested ARM64 or
-x86_64 architecture before signing, so an incorrectly labelled archive is rejected.
+Packaging checks every bundled Mach-O file, including Qt frameworks and plugins,
+for the requested ARM64 or x86_64 slice and a deployment target no newer than
+the package's declared minimum. `Info.plist` and dependency target metadata must
+also agree. A macOS 13-only library therefore stops a macOS 12 job before it
+publishes an installer. In the macOS 12 jobs, qpdf, JPEG and OCR are built with
+the same target as the app.
 
 Both desktop workflows pass `--macos-dmg` to `package_uat.py` for their macOS
 jobs. macOS jobs install the pinned dependencies in
