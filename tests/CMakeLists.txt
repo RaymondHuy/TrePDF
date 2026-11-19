@@ -74,7 +74,7 @@ qt_add_executable(trepdf_edit_controller_tests
     ../src/ShearedTextSlices.h
     ../src/FormFieldLayer.cpp
     ../src/FormFieldLayer.h
-    ../src/PDFAcroFormCanonicalizer.cpp
+    ${TREPDF_ACROFORM_CANONICALIZER_SOURCE}
     ../src/PDFAcroFormCanonicalizer.h
     ../src/PDFAcroFormWriter.cpp
     ../src/PDFAcroFormWriter.h

@@ -52,6 +52,11 @@ Follow the style of the surrounding code:
   generated-file changes.
 - Register new application C++ and QML sources in `CMakeLists.txt`; register
   test sources in `tests/CMakeLists.txt`.
+- CMake selects `src/6.8/PDFAcroFormCanonicalizer.cpp` for Qt 6.8 and
+  `src/PDFAcroFormCanonicalizer.cpp` for Qt 6.9 or newer. Both use the shared
+  header, and application/test targets use the same selected source. Keep PDF
+  behavior fixes synchronized between the two implementations; only Qt API
+  compatibility should differ.
 - Keep build output, local SDK paths, downloaded test documents, and temporary
   debugging code out of commits.
 

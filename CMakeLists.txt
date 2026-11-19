@@ -63,6 +63,16 @@ qt_standard_project_setup(
     I18N_TRANSLATED_LANGUAGES vi en hr th fr de es pt_BR ja zh_CN ko id
 )
 
+# Share the Qt-specific implementation between the application and its tests.
+set(TREPDF_ACROFORM_CANONICALIZER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/PDFAcroFormCanonicalizer.cpp"
+)
+if(Qt6_VERSION VERSION_LESS "6.9.0")
+    set(TREPDF_ACROFORM_CANONICALIZER_SOURCE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/6.8/PDFAcroFormCanonicalizer.cpp"
+    )
+endif()
+
 if(IOS AND (NOT PDFium_ROOT OR NOT QPDF_ROOT))
     message(FATAL_ERROR "iOS needs its own PDFium_ROOT and QPDF_ROOT; run scripts/ci/prepare_ios_dependencies.py")
 endif()
@@ -259,7 +269,7 @@ qt_add_qml_module(trepdf
         src/FormFieldLayer.cpp
         src/FormFieldLayer.h
         src/LibxlsxwriterWorkbook.cpp
-        src/PDFAcroFormCanonicalizer.cpp
+        ${TREPDF_ACROFORM_CANONICALIZER_SOURCE}
         src/PDFAcroFormCanonicalizer.h
         src/PDFAcroFormWriter.cpp
         src/PDFAcroFormWriter.h
