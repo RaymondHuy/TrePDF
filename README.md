@@ -61,6 +61,9 @@ every feature has been verified on every platform.
 macOS packages are separate for ARM64 (M1 and newer) and Intel; they are not
 universal binaries. The current desktop workflows configure Qt 6.12 packages
 for macOS 14.4+, with Qt 6.11 variants targeting macOS 13+.
+The Qt 6.8.3 compatibility variants target macOS 12+ on both
+architectures, using a separate PDFium pin and native dependency builds.
+They need UAT on macOS 12; the GitHub runners use macOS 15.
 
 For test packages, follow the [manual UAT guide](docs/github-uat.md). It explains
 how to run a workflow and download its artifacts. Each macOS job provides a
@@ -78,7 +81,8 @@ macOS test packages use ad-hoc signing and are not notarized.
 - A matching **Qt 6.8+** desktop kit with QML, Quick, Quick Controls 2,
   Network, and LinguistTools. Install Qt Test for tests and Qt Svg for runtime
   deployment. The current desktop workflows use Qt 6.12.0, plus Qt 6.11.0
-  macOS variants; their module lists are in the workflow files.
+  macOS variants, and compatibility builds with Qt 6.8.3; their
+  module lists are in the workflow files.
 - Ninja for the commands below.
 - Native PDFium, qpdf, Tesseract/Leptonica, and zlib dependencies matching your
   operating system and architecture. libxlsxwriter is built from vendored source.
