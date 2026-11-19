@@ -60,8 +60,18 @@ class WindowsPackagingTests(unittest.TestCase):
 
     def run_package(self, *options, arguments=None):
         argv = (self.arguments if arguments is None else arguments) + list(options)
+        native_open = Path.open
+
+        def windows_text_open(path, mode="r", buffering=-1, encoding=None, errors=None, newline=None):
+            # Exercise Windows' default text translation even on macOS/Linux.
+            # An explicit newline argument must still be respected.
+            if "b" not in mode and newline is None and any(flag in mode for flag in "wax"):
+                newline = "\r\n"
+            return native_open(path, mode, buffering, encoding, errors, newline)
+
         with patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()), \
-                contextlib.redirect_stderr(io.StringIO()):
+                contextlib.redirect_stderr(io.StringIO()), \
+                patch.object(Path, "open", windows_text_open):
             package_uat.main()
 
     def test_folder_retains_runtime_metadata_and_licenses_without_archiving(self):
@@ -73,7 +83,7 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertEqual(self.exe.read_bytes(), b"synthetic Windows executable")
         self.assertTrue((self.exe.parent / "Qt6Core.dll").is_file())
         self.assertTrue((self.exe.parent / "tessdata/vie.traineddata").is_file())
-        self.assertEqual((self.stage / "VERSION").read_text(), "0.0.1\n")
+        self.assertEqual((self.stage / "VERSION").read_bytes(), b"0.0.1\n")
         metadata = json.loads((self.stage / "build-info.json").read_text())
         self.assertEqual(metadata["version"], "0.0.1")
         self.assertEqual(metadata["platform"], "windows-x64")

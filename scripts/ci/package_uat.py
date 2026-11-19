@@ -257,7 +257,7 @@ def main() -> None:
             "https://support.apple.com/en-us/102445\n", encoding="utf-8")
     else:
         smoke_test(executable, args.platform)
-    (stage / "VERSION").write_text(args.version + "\n", encoding="utf-8")
+    (stage / "VERSION").write_text(args.version + "\n", encoding="utf-8", newline="\n")
     metadata = {
         "version": args.version,
         "platform": args.platform,
