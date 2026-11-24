@@ -19,7 +19,7 @@ jobs:
   build:
     name: ${{ matrix.package || matrix.platform }}
     runs-on: macos-15-intel
-    timeout-minutes: 60
+    timeout-minutes: 210
     strategy:
       fail-fast: false
       matrix:
@@ -114,13 +114,19 @@ jobs:
           cmake --install build/uat --config Release \
             --prefix "$PWD/build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE"
 
-      - name: Verify and package
+      - name: Sign, notarize and verify macOS downloads
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
           python scripts/ci/package_uat.py \
             --platform "$TREPDF_PLATFORM" --version "$TREPDF_VERSION" \
             --variant "$TREPDF_VARIANT" \
             --stage "build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE" \
-            --dependencies _deps/uat --output artifacts --macos-dmg
+            --dependencies _deps/uat --output artifacts --macos-dmg --macos-notarize
 
       - name: Upload DMG directly
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
