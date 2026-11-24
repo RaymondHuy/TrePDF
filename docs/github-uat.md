@@ -55,17 +55,17 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
    Apple Silicon and Linux, choose **Actions → uat → Run workflow** instead.
    For one installer supporting both Mac architectures, choose
    **Actions → uat-macos-universal → Run workflow**.
-   Select the branch and start the run.
-3. On macOS, download the `TrePDF-0.0.x-<package>.dmg` entry under **Artifacts**
+   Select the branch. Enter an optional **version** such as `1.2.3`, or leave
+   it blank to use `0.0.<run number>`, then start the run.
+3. On macOS, download the `TrePDF-<version>-<package>.dmg` entry under **Artifacts**
    in that workflow run. This downloads the DMG directly, with no outer ZIP to
    extract. For an Intel Mac, choose `TrePDF-0.0.x-macos-x64.dmg` (macOS 14.4+)
    or `TrePDF-0.0.x-macos-x64-qt6.11.dmg` (macOS 13+). For macOS 12, choose
    the `-qt6.8.dmg` package for your architecture, for example
    `TrePDF-0.0.x-macos-arm64-qt6.8.dmg` on Apple Silicon. The matching
    `.dmg.sha256` entry is a separate direct download for checksum verification.
-   The universal workflow produces
-   `TrePDF-0.0.N-macos-universal-qt6.11.dmg`, where `N` is its run number;
-   use the same file on either Mac architecture.
+   For example, entering `1.2.3` in the universal workflow produces
+   `TrePDF-1.2.3-macos-universal-qt6.11.dmg` for either Mac architecture.
 4. To verify the DMG, save its `.dmg.sha256` file in the same directory and run
    the following command there, replacing the filename with your package:
 
@@ -114,18 +114,16 @@ gh run watch
 The first command uses the default branch. Add `--ref your-branch` to select
 another pushed branch; select the Intel run when `gh run watch` prompts.
 
-## Automatic version
+## Build version
 
-`TREPDF_VERSION` is `0.0.${{ github.run_number }}`. Each workflow has its own
-counter: its first new run is `0.0.1`, the next is `0.0.2`, and so on. All packages
-in one run share the version, but separate workflows do not synchronize their
-version numbers. The new Intel workflow starts its own sequence; it does not
-continue the old Intel jobs' `uat` run numbers. Identify older and newer builds
-by their workflow run and source commit when comparing across this split.
-Failed or cancelled runs consume their number, so downloadable versions may
-have gaps. **Re-run jobs** keeps the same version; start a new **Run workflow**
-to increment it. This follows GitHub's
-[workflow run-number semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/variables).
+All five manual workflows accept a `version` input in numeric `major.minor.patch`
+format without leading zeros. All packages in a run use the same version.
+The desktop app shows it on the **Information** tab. For example, to build
+the universal installer and display **Version 1.2.3**, run
+`gh workflow run uat-macos-universal.yml -f version=1.2.3`.
+
+With the field empty, each workflow uses its own `0.0.${{ github.run_number }}`
+sequence. **Re-run jobs** retains the original version in either mode.
 
 The version is passed to CMake and embedded in the application, macOS bundle
 and Windows executable metadata. It is also recorded in the output folder/archive name,

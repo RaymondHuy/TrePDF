@@ -8,11 +8,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tempfile
 import zipfile
+
+from app_version import app_version
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -124,11 +125,9 @@ def main() -> None:
     parser.add_argument("--dependencies", type=Path, default=REPO / "_deps/web")
     parser.add_argument("--stage", type=Path, default=REPO / "build/web-site")
     parser.add_argument("--output", type=Path, default=REPO / "artifacts/web")
-    parser.add_argument("--version", required=True)
+    parser.add_argument("--version", type=app_version, required=True)
     parser.add_argument("--parallel", type=int, default=3)
     args = parser.parse_args()
-    if not re.fullmatch(r"0\.0\.[1-9][0-9]*", args.version):
-        parser.error("UAT version must have the form 0.0.x, with x >= 1")
     if args.parallel < 1:
         parser.error("--parallel must be at least one")
     build, stage, output = args.build.resolve(), args.stage.resolve(), args.output.resolve()

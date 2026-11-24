@@ -147,7 +147,7 @@ class MacOSPackagingTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="trepdf-macos-package-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        self.stage = self.root / "TrePDF-0.0.1-macos-universal-qt6.11"
+        self.stage = self.root / "TrePDF-1.2.3-macos-universal-qt6.11"
         self.app = self.stage / "trepdf.app"
         self.output = self.root / "output"
         self.dependencies = self.root / "dependencies"
@@ -155,14 +155,14 @@ class MacOSPackagingTests(unittest.TestCase):
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"synthetic universal executable")
         (self.app / "Contents/Info.plist").write_bytes(
-            plistlib.dumps({"LSMinimumSystemVersion": "13.0"}))
+            plistlib.dumps({"LSMinimumSystemVersion": "13.0", "CFBundleShortVersionString": "1.2.3"}))
         self.ocr = self.dependencies / "ocr"
         for directory in (self.ocr / "share/tessdata", self.app / "Contents/Resources/tessdata"):
             directory.mkdir(parents=True)
             for name in ("eng.traineddata", "vie.traineddata", "pdf.ttf"):
                 (directory / name).write_bytes(name.encode())
         (self.dependencies / "licenses").mkdir()
-        self.arguments = [str(SCRIPT), "--platform", "macos-universal", "--version", "0.0.1",
+        self.arguments = [str(SCRIPT), "--platform", "macos-universal", "--version", "1.2.3",
                           "--variant", "qt6.11", "--stage", str(self.stage),
                           "--dependencies", str(self.dependencies), "--output", str(self.output)]
         self.set_platform("macos-universal")
@@ -201,9 +201,15 @@ class MacOSPackagingTests(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()):
             package_uat.main()
 
+    def test_rejects_stale_app_version_before_packaging(self):
+        self.arguments[self.arguments.index("--version") + 1] = "1.2.4"
+        with self.assertRaisesRegex(RuntimeError, "Built app version '1.2.3'.*'1.2.4'"):
+            self.run_package("--macos-dmg")
+        self.assertFalse(self.output.exists())
+
     def test_universal_verifies_both_slices_and_packages_dmg_with_metadata(self):
         def fake_dmg(stage, destination, version):
-            self.assertEqual((stage, version), (self.stage, "0.0.1"))
+            self.assertEqual((stage, version), (self.stage, "1.2.3"))
             destination.write_bytes(b"synthetic disk image")
 
         with patch.object(package_uat, "verify_tree") as verify, \
@@ -230,7 +236,7 @@ class MacOSPackagingTests(unittest.TestCase):
         self.assertEqual(metadata["qt"], "6.11.0")
         self.assertIn("Intel and Apple Silicon", (self.stage / "START-HERE.txt").read_text())
         for suffix in ("zip", "dmg"):
-            archive = self.output / f"TrePDF-0.0.1-macos-universal-qt6.11.{suffix}"
+            archive = self.output / f"TrePDF-1.2.3-macos-universal-qt6.11.{suffix}"
             self.assertTrue(archive.is_file())
             checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
             self.assertEqual(Path(str(archive) + ".sha256").read_text(),
