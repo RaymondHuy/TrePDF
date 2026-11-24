@@ -17,7 +17,11 @@ import tempfile
 from macos_compat import verify_tree, version_tuple
 
 
-MACOS_ARCHITECTURES = {"macos-arm64": "arm64", "macos-x64": "x86_64"}
+MACOS_ARCHITECTURES = {
+    "macos-arm64": ("arm64",),
+    "macos-x64": ("x86_64",),
+    "macos-universal": ("arm64", "x86_64"),
+}
 
 
 def verify_macos_bundle(app: Path) -> None:
@@ -174,7 +178,7 @@ def smoke_test(executable: Path, target: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", choices=("windows-x64", "macos-arm64", "macos-x64", "linux-x64"),
+    parser.add_argument("--platform", choices=("windows-x64", *MACOS_ARCHITECTURES, "linux-x64"),
                         required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--variant", default="",
@@ -204,6 +208,7 @@ def main() -> None:
         "windows-x64": "bin/trepdf.exe",
         "macos-arm64": "trepdf.app/Contents/MacOS/trepdf",
         "macos-x64": "trepdf.app/Contents/MacOS/trepdf",
+        "macos-universal": "trepdf.app/Contents/MacOS/trepdf",
         "linux-x64": "bin/trepdf",
     }[args.platform]
     if not executable.is_file():
@@ -239,9 +244,14 @@ def main() -> None:
             app_target = plistlib.load(stream).get("LSMinimumSystemVersion", "")
         if version_tuple(app_target) != version_tuple(deployment_target):
             raise RuntimeError("Bundle minimum macOS version does not match its deployment target")
-        verify_tree(stage / "trepdf.app", MACOS_ARCHITECTURES[args.platform], deployment_target)
+        for architecture in MACOS_ARCHITECTURES[args.platform]:
+            verify_tree(stage / "trepdf.app", architecture, deployment_target)
         sign_macos_bundle(stage / "trepdf.app")
-        processor = "Apple Silicon" if args.platform == "macos-arm64" else "Intel"
+        processor = {
+            "macos-arm64": "Apple Silicon",
+            "macos-x64": "Intel",
+            "macos-universal": "Intel and Apple Silicon — Universal",
+        }[args.platform]
         (stage / "START-HERE.txt").write_text(
             f"TrePDF UAT for macOS ({processor})\n\n"
             f"Minimum macOS: {deployment_target}\n"
@@ -271,6 +281,7 @@ def main() -> None:
     if args.platform in MACOS_ARCHITECTURES:
         metadata["macos_signing"] = "ad-hoc; not notarized"
         metadata["macos_deployment_target"] = deployment_target
+        metadata["macos_architectures"] = list(MACOS_ARCHITECTURES[args.platform])
     (stage / "build-info.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     shutil.copytree(args.dependencies / "licenses", stage / "licenses", dirs_exist_ok=True)
