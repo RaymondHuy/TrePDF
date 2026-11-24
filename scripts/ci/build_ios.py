@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 
+from app_version import app_version
 from ios_signing import signing_assets
 
 
@@ -50,7 +51,7 @@ def main() -> None:
     parser.add_argument("--dependencies", type=Path, required=True)
     parser.add_argument("--build", type=Path, default=Path("build/ipad"))
     parser.add_argument("--output", type=Path, default=Path("artifacts/ipad"))
-    parser.add_argument("--version", default="0.0.1")
+    parser.add_argument("--version", type=app_version, default="0.0.1")
     parser.add_argument("--bundle-id", default="com.treoffice.trepdf")
     parser.add_argument("--team-id", default="")
     parser.add_argument("--configure-only", action="store_true",
@@ -58,8 +59,6 @@ def main() -> None:
     parser.add_argument("--signing", choices=("unsigned", "development", "ad-hoc", "app-store-connect"),
                         default="unsigned")
     args = parser.parse_args()
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version):
-        parser.error("Version must use major.minor.patch")
     if not re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", args.bundle_id):
         parser.error("Bundle ID must be a reverse-DNS identifier")
     if args.team_id and not re.fullmatch(r"[A-Z0-9]{10}", args.team_id):

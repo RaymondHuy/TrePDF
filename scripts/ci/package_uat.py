@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 
+from app_version import app_version
 from macos_compat import verify_tree, version_tuple
 
 
@@ -180,7 +181,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("windows-x64", *MACOS_ARCHITECTURES, "linux-x64"),
                         required=True)
-    parser.add_argument("--version", required=True)
+    parser.add_argument("--version", type=app_version, required=True)
     parser.add_argument("--variant", default="",
                         help="Optional archive suffix, for example qt6.11")
     parser.add_argument("--macos-dmg", action="store_true",
@@ -191,8 +192,6 @@ def main() -> None:
     parser.add_argument("--dependencies", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if not re.fullmatch(r"0\.0\.[1-9][0-9]*", args.version):
-        parser.error("UAT version must have the form 0.0.x, with x >= 1")
     if args.variant and not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", args.variant):
         parser.error("Package variant must contain only lowercase letters, digits, dots or hyphens")
     if args.macos_dmg and args.platform not in MACOS_ARCHITECTURES:
@@ -241,7 +240,11 @@ def main() -> None:
         if version_tuple(configured_target) != version_tuple(deployment_target):
             raise RuntimeError("Dependency and application macOS deployment targets differ")
         with (stage / "trepdf.app/Contents/Info.plist").open("rb") as stream:
-            app_target = plistlib.load(stream).get("LSMinimumSystemVersion", "")
+            info = plistlib.load(stream)
+        bundle_version = info.get("CFBundleShortVersionString")
+        if bundle_version != args.version:
+            raise RuntimeError(f"Built app version {bundle_version!r} differs from package version {args.version!r}")
+        app_target = info.get("LSMinimumSystemVersion", "")
         if version_tuple(app_target) != version_tuple(deployment_target):
             raise RuntimeError("Bundle minimum macOS version does not match its deployment target")
         for architecture in MACOS_ARCHITECTURES[args.platform]:

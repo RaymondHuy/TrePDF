@@ -1,9 +1,9 @@
 # Build và thử TrePDF trên iPad
 
 TrePDF có target iPad riêng, yêu cầu iPadOS 18 trở lên. Build bằng Qt 6.12.0
-for iOS và Xcode trên Mac. Workflow desktop `uat` và các thư viện macOS giữ
-nguyên; workflow mới là `uat-ipad`, chạy thủ công với version `0.0.x` theo số
-lần chạy của riêng workflow này. Re-run giữ version cũ. Giới hạn iPadOS 18
+for iOS và Xcode trên Mac. Khi chạy thủ công `uat-ipad`, nhập **version**
+như `1.2.3` hoặc để trống để dùng `0.0.<số lần chạy>` của workflow iPad.
+Re-run giữ phiên bản ban đầu. Giới hạn iPadOS 18
 theo [nền tảng được Qt 6.12 hỗ trợ](https://doc.qt.io/qt-6.12/supported-platforms.html).
 
 ## Tổ chức component theo platform
