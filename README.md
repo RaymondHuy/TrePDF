@@ -58,8 +58,8 @@ every feature has been verified on every platform.
 | iPad | Separate iOS build and `uat-ipad` workflow; see the [iPad guide](docs/ipad-build.md). |
 | Browser | Separate WebAssembly preview with a smaller feature set; see the [web guide](docs/web-build.md). |
 
-macOS packages are separate for ARM64 (M1 and newer) and Intel; they are not
-universal binaries. The current desktop workflows configure Qt 6.12 packages
+The macOS workflows offer separate ARM64 and Intel packages and a Qt 6.11
+universal installer for both architectures. The current desktop workflows configure Qt 6.12 packages
 for macOS 14.4+, with Qt 6.11 variants targeting macOS 13+.
 The Qt 6.8.3 compatibility variants target macOS 12+ on both
 architectures, using a separate PDFium pin and native dependency builds.
@@ -70,8 +70,8 @@ how to run a workflow and download its artifacts. Each macOS job provides a
 direct-download `.dmg` artifact and a separate `.dmg.sha256` artifact, plus a
 ZIP fallback. The DMG opens with the app on the left and an arrow pointing to
 Applications on the right; drag the app across to install it. These workflows
-do not publish GitHub Releases or run the full feature test suite. Current
-macOS test packages use ad-hoc signing and are not notarized.
+do not publish GitHub Releases or run the full feature test suite. The macOS jobs sign with Developer ID
+and verify Apple notarization before uploading the DMG and ZIP.
 
 ## Build
 

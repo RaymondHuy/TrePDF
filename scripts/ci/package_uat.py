@@ -16,6 +16,7 @@ import tempfile
 
 from app_version import app_version
 from macos_compat import verify_tree, version_tuple
+from macos_signing import notarize, signing_assets, take_credentials
 
 
 MACOS_ARCHITECTURES = {
@@ -29,10 +30,9 @@ def verify_macos_bundle(app: Path) -> None:
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
 
 
-def sign_macos_bundle(app: Path) -> None:
+def sign_macos_bundle(app: Path, developer_id: list[str] | None = None) -> None:
     # Deployment changes Mach-O load commands and adds bundle resources after
     # linking. Seal nested code first, then its containing bundles, then the app.
-    # Ad-hoc signing preserves integrity for UAT; it is not Developer ID/notarization.
     mach_o_magic = {
         b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
         b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
@@ -50,12 +50,15 @@ def sign_macos_bundle(app: Path) -> None:
                 if stream.read(4) in mach_o_magic:
                     code.append(path)
     for path in sorted(code, key=lambda item: (-len(item.parts), str(item))) + [app]:
-        subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none", str(path)],
-                       check=True)
+        options = [*developer_id, "--options", "runtime"] if developer_id else ["--sign", "-", "--timestamp=none"]
+        if developer_id and path == app:
+            entitlements = Path(__file__).resolve().parents[2] / "platform/macos/DeveloperID.entitlements"
+            options += ["--entitlements", str(entitlements)]
+        subprocess.run(["codesign", "--force", *options, str(path)], check=True)
     verify_macos_bundle(app)
 
 
-def create_macos_dmg(stage: Path, destination: Path, version: str) -> None:
+def create_macos_dmg(stage: Path, destination: Path, version: str, *, notarized_app=False) -> None:
     # Author Finder metadata directly so CI does not need a running Finder.
     try:
         from dmgbuild import build_dmg
@@ -110,6 +113,8 @@ def create_macos_dmg(stage: Path, destination: Path, version: str) -> None:
                         "-mountpoint", str(mount)], check=True)
         try:
             verify_macos_bundle(mount / "trepdf.app")
+            if notarized_app:
+                subprocess.run(["xcrun", "stapler", "validate", str(mount / "trepdf.app")], check=True)
             shortcut = mount / "Applications"
             if not shortcut.is_symlink() or os.readlink(shortcut) != "/Applications":
                 raise RuntimeError("DMG is missing its Applications shortcut")
@@ -186,6 +191,8 @@ def main() -> None:
                         help="Optional archive suffix, for example qt6.11")
     parser.add_argument("--macos-dmg", action="store_true",
                         help="Also create and verify a drag-to-install macOS DMG")
+    parser.add_argument("--macos-notarize", action="store_true",
+                        help="Sign with Developer ID and notarize the app and DMG with Apple")
     parser.add_argument("--no-archive", action="store_true",
                         help="Verify the deployed Windows application folder without creating a ZIP")
     parser.add_argument("--stage", type=Path, required=True)
@@ -198,6 +205,9 @@ def main() -> None:
         parser.error("--macos-dmg requires a macOS platform")
     if args.no_archive and args.platform != "windows-x64":
         parser.error("--no-archive requires the windows-x64 platform")
+    if args.macos_notarize and not args.macos_dmg:
+        parser.error("--macos-notarize requires --macos-dmg")
+    credentials = take_credentials() if args.macos_notarize else None
     package = args.platform + (f"-{args.variant}" if args.variant else "")
     stage = args.stage.resolve()
     manifest = json.loads((args.dependencies / "manifest.json").read_text(encoding="utf-8"))
@@ -249,21 +259,28 @@ def main() -> None:
             raise RuntimeError("Bundle minimum macOS version does not match its deployment target")
         for architecture in MACOS_ARCHITECTURES[args.platform]:
             verify_tree(stage / "trepdf.app", architecture, deployment_target)
-        sign_macos_bundle(stage / "trepdf.app")
+        if not args.macos_notarize:
+            sign_macos_bundle(stage / "trepdf.app")
         processor = {
             "macos-arm64": "Apple Silicon",
             "macos-x64": "Intel",
             "macos-universal": "Intel and Apple Silicon — Universal",
         }[args.platform]
+        if args.macos_notarize:
+            signing_note = "Signed with Developer ID Application and notarized by Apple."
+            first_launch = ""
+        else:
+            signing_note = "This build has an ad-hoc integrity signature, without Apple notarization."
+            first_launch = ("If macOS blocks it as an unidentified developer, approve this app in\n"
+                            "System Settings > Privacy & Security > Open Anyway.\n")
         (stage / "START-HERE.txt").write_text(
             f"TrePDF UAT for macOS ({processor})\n\n"
             f"Minimum macOS: {deployment_target}\n"
             f"Qt: {os.environ.get('QT_VERSION', 'local')}\n\n"
-            "This build has an ad-hoc integrity signature, without Apple notarization.\n"
+            f"{signing_note}\n"
             "After verifying the package SHA-256, open the DMG and drag trepdf.app\n"
             "to Applications, or extract the ZIP and open trepdf.app.\n"
-            "If macOS blocks it as an unidentified developer, approve this app in\n"
-            "System Settings > Privacy & Security > Open Anyway.\n"
+            f"{first_launch}"
             "If signature verification fails or it is reported as damaged, do not\n"
             "override that warning; download a newly built package.\n\n"
             "Verify the app: codesign --verify --deep --strict /path/to/trepdf.app\n"
@@ -282,7 +299,8 @@ def main() -> None:
         "dependencies": manifest["versions"],
     }
     if args.platform in MACOS_ARCHITECTURES:
-        metadata["macos_signing"] = "ad-hoc; not notarized"
+        metadata["macos_signing"] = ("Developer ID Application; notarized" if args.macos_notarize
+                                     else "ad-hoc; not notarized")
         metadata["macos_deployment_target"] = deployment_target
         metadata["macos_architectures"] = list(MACOS_ARCHITECTURES[args.platform])
     (stage / "build-info.json").write_text(
@@ -308,6 +326,25 @@ def main() -> None:
 
     args.output.mkdir(parents=True, exist_ok=True)
     archive_base = args.output.resolve() / f"TrePDF-{args.version}-{package}"
+    if args.macos_dmg:
+        dmg = Path(str(archive_base) + ".dmg")
+        if args.macos_notarize:
+            app = stage / "trepdf.app"
+            with signing_assets(credentials) as (identity, auth):
+                sign_macos_bundle(app, identity)
+                with tempfile.TemporaryDirectory(prefix="trepdf-notary-") as temporary:
+                    submission = Path(temporary) / "trepdf.zip"
+                    subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent",
+                                    str(app), str(submission)], check=True)
+                    notarize(submission, app, auth)
+                create_macos_dmg(stage, dmg, args.version, notarized_app=True)
+                subprocess.run(["codesign", "--force", *identity, str(dmg)], check=True)
+                notarize(dmg, dmg, auth)
+            subprocess.run(["codesign", "--verify", "--strict", str(dmg)], check=True)
+            subprocess.run(["spctl", "--assess", "--type", "open", "--context",
+                            "context:primary-signature", str(dmg)], check=True)
+        else:
+            create_macos_dmg(stage, dmg, args.version)
     if args.platform in MACOS_ARCHITECTURES:
         archive = Path(str(archive_base) + ".zip")
         # Preserve .app permissions and framework symlinks inside the ZIP.
@@ -318,6 +355,9 @@ def main() -> None:
             subprocess.run(["ditto", "-x", "-k", str(archive), temporary], check=True)
             restored_app = Path(temporary) / stage.name / "trepdf.app"
             verify_macos_bundle(restored_app)
+            if args.macos_notarize:
+                subprocess.run(["xcrun", "stapler", "validate", str(restored_app)], check=True)
+                subprocess.run(["spctl", "--assess", "--type", "execute", str(restored_app)], check=True)
             smoke_test(restored_app / "Contents/MacOS/trepdf", args.platform)
     else:
         archive = Path(shutil.make_archive(str(archive_base),
@@ -325,8 +365,6 @@ def main() -> None:
                        root_dir=stage.parent, base_dir=stage.name))
     archives = [archive]
     if args.macos_dmg:
-        dmg = Path(str(archive_base) + ".dmg")
-        create_macos_dmg(stage, dmg, args.version)
         archives.append(dmg)
     for archive in archives:
         digest = hashlib.sha256()

@@ -257,6 +257,45 @@ class MacOSPackagingTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertFalse((self.stage / "build-info.json").exists())
 
+    def test_notarized_downloads_include_stapled_app_and_final_dmg_checksum(self):
+        ticket = self.app / "Contents/ticket-fixture"
+        def staple(submission, target, auth):
+            self.assertTrue(submission.is_file())
+            if target == self.app:
+                ticket.write_bytes(b"app ticket")
+            else:
+                self.assertEqual(target.read_bytes(), b"signed dmg")
+                target.write_bytes(b"stapled dmg")
+
+        def build_image(stage, destination, version, *, notarized_app):
+            self.assertTrue(notarized_app)
+            self.assertTrue(ticket.exists())
+            destination.write_bytes(b"disk image")
+
+        def native(command, *, check):
+            if command[0] == "ditto":
+                self.fake_ditto(command, check=check)
+            elif command[:2] == ["codesign", "--force"]:
+                Path(command[-1]).write_bytes(b"signed dmg")
+            elif command[:3] == ["xcrun", "stapler", "validate"]:
+                self.assertEqual((Path(command[-1]) / "Contents/ticket-fixture").read_bytes(), b"app ticket")
+            else:
+                self.assertIn(command[0], ("codesign", "spctl"))
+
+        with patch.object(package_uat, "take_credentials", return_value={}), \
+                patch.object(package_uat, "signing_assets", return_value=contextlib.nullcontext((["--sign", "id"], []))), \
+                patch.object(package_uat, "verify_tree"), patch.object(package_uat, "sign_macos_bundle") as sign, \
+                patch.object(package_uat, "notarize", side_effect=staple) as submit, \
+                patch.object(package_uat, "create_macos_dmg", side_effect=build_image), \
+                patch.object(package_uat, "verify_macos_bundle"), patch.object(package_uat, "smoke_test"), \
+                patch.object(package_uat.subprocess, "run", side_effect=native):
+            self.run_package("--macos-notarize", "--macos-dmg")
+        sign.assert_called_once_with(self.app, ["--sign", "id"])
+        self.assertEqual(submit.call_count, 2)
+        checksum = next(self.output.glob("*.dmg.sha256"))
+        self.assertEqual(checksum.read_text().split()[0], hashlib.sha256(b"stapled dmg").hexdigest())
+        self.assertNotIn("Open Anyway", (self.stage / "START-HERE.txt").read_text())
+
     def test_single_architecture_packages_keep_their_existing_checks(self):
         for platform, architecture in (("macos-arm64", "arm64"), ("macos-x64", "x86_64")):
             with self.subTest(platform=platform):

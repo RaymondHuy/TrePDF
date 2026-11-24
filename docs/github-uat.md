@@ -100,8 +100,8 @@ There are no automatic push, pull-request or schedule triggers. Each workflow
 runs its configured matrix independently. A failed matrix job does not cancel
 its siblings. Final downloads are retained for 30 days, subject to repository
 policy. The universal workflow retains its intermediate `internal-*` artifacts
-for seven days. These workflows only need
-`contents: read`; no custom secret, tag write or release publication is required.
+for seven days. The workflows use `contents: read`. macOS packaging requires the
+five repository secrets listed below.
 
 With GitHub CLI authenticated, you can also start only the Intel workflow from
 the repository directory and watch its progress:
@@ -201,7 +201,8 @@ architectures use Qt's universal `clang_64` package; the workflow selects
 `arm64`, `x86_64`, or both through `CMAKE_OSX_ARCHITECTURES`.
 
 After macOS deployment, packaging signs nested Mach-O files and frameworks from
-the inside out, then signs the complete app with an ad-hoc signature. It verifies
+the inside out with a Developer ID Application identity, hardened runtime and
+secure timestamps, then signs the complete app. It verifies
 the complete resource seal with `codesign --verify --deep --strict`, creates the
 ZIP, extracts it again, and repeats verification and startup on the extracted
 app. This catches incomplete linker signatures and signatures invalidated by
@@ -230,7 +231,7 @@ its own SHA-256 file before upload. The pinned
 [`upload-artifact` action](https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/README.md#upload-an-individual-file-unzipped)
 uploads the DMG and its checksum separately with `archive: false`, so each is
 downloaded as its original file. The existing package artifact contains the ZIP
-and ZIP checksum. Packaging needs no additional secrets. The local
+and ZIP checksum. The local
 `pipelines/build-macos.sh` script does not enable this option and continues to
 produce ZIP packages.
 
@@ -242,18 +243,26 @@ QML/plugin loading failures before archiving. This is a startup smoke check;
 `BUILD_TESTING=OFF` means the full feature test suite is not run. It does not
 replace native rendering or manual UAT.
 
-These are UAT archives, without a Developer ID distribution certificate or Apple
-notarization. The macOS ad-hoc signature verifies integrity but does not establish
-Gatekeeper trust. For a trusted UAT download, verify its checksum and app signature,
-then use **System Settings → Privacy & Security → Open Anyway** if macOS blocks
-the unidentified developer. See [Apple's instructions](https://support.apple.com/en-us/102445).
-Do not override a damaged/invalid signature warning; rebuild or download the
-fixed package. These instructions are in `Read Me/START-HERE.txt` on the DMG
-and `START-HERE.txt` in the ZIP package.
-Public distribution without this manual approval needs Developer ID signing and
-Apple notarization. The workflow does not change Gatekeeper settings or publish
-a GitHub Release. The DMG provides drag-to-install packaging; it does not add
-Developer ID signing or notarization.
+## macOS signing and notarization
+
+The macOS jobs in `uat`, `uat-macos-intel` and `uat-macos-universal` use these
+GitHub Actions secrets during the packaging step:
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE_BASE64` | Base64 of a .p12 export containing a valid **Developer ID Application** certificate and its private key |
+| `APPLE_CERTIFICATE_PASSWORD` | Password used to export that .p12 |
+| `APPLE_API_KEY_BASE64` | Base64 of the App Store Connect team API key's .p8 file |
+| `APPLE_API_KEY_ID` | ID of that API key |
+| `APPLE_API_ISSUER_ID` | Issuer ID for that key |
+
+Each runner imports the certificate into a temporary keychain. It submits a
+ZIP of the signed app to Apple with `notarytool`, waits for acceptance and
+staples the ticket to the app. The final ZIP and DMG both contain this app.
+It also signs the DMG and submits it separately for its own ticket. Packaging
+checks the tickets and Gatekeeper assessments before uploading downloads and
+computes checksums after stapling. A rejected submission fails the job and
+prints Apple's diagnostic log. Local packaging keeps its ad-hoc signature.
 
 For deployment API details, see Qt's
 [QML application deployment documentation](https://doc.qt.io/qt-6/qt-generate-deploy-qml-app-script.html).

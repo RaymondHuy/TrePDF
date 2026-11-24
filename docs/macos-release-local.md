@@ -236,7 +236,7 @@ on the updated branch. Re-running an older job retains its old workflow.
 This workflow launches only the two Intel jobs. Windows, Apple Silicon and Linux
 remain in the independent `uat` workflow. Each macOS job produces a separate
 DMG and ZIP, each with its own checksum; these are architecture-specific
-packages. They use ad-hoc signing as described below. Each workflow has its own
+packages. The GitHub jobs use [Developer ID signing and notarization](github-uat.md#macos-signing-and-notarization). Each workflow has its own
 `0.0.x` version counter. The local `pipelines/build-macos.sh` script continues
 to produce ZIP packages; use the local DMG instructions above for that path.
 
