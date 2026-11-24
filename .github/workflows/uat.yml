@@ -19,7 +19,7 @@ jobs:
   build:
     name: ${{ matrix.package || matrix.platform }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ startsWith(matrix.platform, 'macos-') && 210 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -172,12 +172,26 @@ jobs:
           cmake --install build/uat --config Release \
             --prefix "$PWD/build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE"
 
+      - name: Sign, notarize and verify macOS downloads
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          python scripts/ci/package_uat.py \
+            --platform "$TREPDF_PLATFORM" --version "$TREPDF_VERSION" \
+            --variant "$TREPDF_VARIANT" \
+            --stage "build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE" \
+            --dependencies _deps/uat --output artifacts --macos-dmg --macos-notarize
+
       - name: Verify and package
+        if: runner.os != 'macOS'
         run: |
           package_options=()
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            package_options+=(--macos-dmg)
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
             package_options+=(--no-archive)
           fi
           python scripts/ci/package_uat.py \
