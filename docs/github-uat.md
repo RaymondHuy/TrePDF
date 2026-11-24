@@ -3,7 +3,10 @@
 The [`uat` workflow](../.github/workflows/uat.yml) builds Windows, Apple Silicon
 and Linux Release packages. The separate
 [`uat-macos-intel` workflow](../.github/workflows/uat-macos-intel.yml) builds only
-the Intel macOS packages. Run either workflow independently; all SDKs and
+the Intel macOS packages. The
+[`uat-macos-universal` workflow](../.github/workflows/uat-macos-universal.yml)
+builds one Qt 6.11 package for both Intel and Apple Silicon Macs.
+Run any workflow independently; all SDKs and
 native dependencies are prepared on GitHub, with no local build required:
 
 | Workflow | Package | GitHub runner | Toolchain | Output |
@@ -15,6 +18,7 @@ native dependencies are prepared on GitHub, with no local build required:
 | `uat-macos-intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.dmg` and `.zip` |
 | `uat-macos-intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.dmg` and `.zip` |
 | `uat-macos-intel` | `macos-x64-qt6.8` | `macos-15-intel` | Apple Clang x86_64, Qt 6.8.3 | `.dmg` and `.zip` |
+| `uat-macos-universal` | `macos-universal-qt6.11` | `macos-15` and `macos-15-intel` | Apple Clang, Qt 6.11.0 | Universal `.dmg` and `.zip` |
 | `uat` | `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
 
 Choose `macos-arm64` for Apple Silicon (M1 or newer), or `macos-x64` for Intel
@@ -32,7 +36,9 @@ These are beta compatibility builds. A successful GitHub run verifies build,
 deployment, binary minimum-OS metadata and startup on macOS 15; it does not
 replace feature testing on an actual macOS 12 machine. Test text editing,
 Save/reopen, forms, OCR and table export before distributing them widely.
-All macOS packages are separate architecture builds, not universal binaries.
+The `uat` and `uat-macos-intel` macOS packages contain one architecture.
+Choose `macos-universal-qt6.11` for a single installer that runs natively on
+both Intel and Apple Silicon, with macOS 13.0 or newer.
 Intel jobs run natively on GitHub's
 [`macos-15-intel` runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 The Linux package targets Ubuntu 24.04
@@ -47,6 +53,8 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
    dispatch control.
 2. For Intel, open **Actions → uat-macos-intel → Run workflow**. For Windows,
    Apple Silicon and Linux, choose **Actions → uat → Run workflow** instead.
+   For one installer supporting both Mac architectures, choose
+   **Actions → uat-macos-universal → Run workflow**.
    Select the branch and start the run.
 3. On macOS, download the `TrePDF-0.0.x-<package>.dmg` entry under **Artifacts**
    in that workflow run. This downloads the DMG directly, with no outer ZIP to
@@ -55,6 +63,9 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
    the `-qt6.8.dmg` package for your architecture, for example
    `TrePDF-0.0.x-macos-arm64-qt6.8.dmg` on Apple Silicon. The matching
    `.dmg.sha256` entry is a separate direct download for checksum verification.
+   The universal workflow produces
+   `TrePDF-0.0.N-macos-universal-qt6.11.dmg`, where `N` is its run number;
+   use the same file on either Mac architecture.
 4. To verify the DMG, save its `.dmg.sha256` file in the same directory and run
    the following command there, replacing the filename with your package:
 
@@ -85,10 +96,11 @@ these changes, choose **Run workflow** and the updated branch. **Re-run jobs**
 on an older run uses that run's old workflow and retains its previous packaging.
 See GitHub's [re-run behavior](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
 
-There are no automatic push, pull-request or schedule triggers. `uat` runs five
-jobs. Each workflow runs its configured matrix independently. Within
-each workflow, a failed matrix job does not cancel its siblings. Artifacts
-are retained for 30 days, subject to repository policy. Both workflows only need
+There are no automatic push, pull-request or schedule triggers. Each workflow
+runs its configured matrix independently. A failed matrix job does not cancel
+its siblings. Final downloads are retained for 30 days, subject to repository
+policy. The universal workflow retains its intermediate `internal-*` artifacts
+for seven days. These workflows only need
 `contents: read`; no custom secret, tag write or release publication is required.
 
 With GitHub CLI authenticated, you can also start only the Intel workflow from
@@ -121,7 +133,8 @@ and Windows executable metadata. It is also recorded in the output folder/archiv
 versions. Each alternate Qt package uses distinct names for its staging
 directory, artifact, ZIP, DMG and checksums; for example, Qt 6.8 metadata records
 `qt: 6.8.3`, `variant: qt6.8` and `macos_deployment_target: 12.0`.
-Each macOS job uses native PDF dependencies matching its architecture.
+The single-architecture macOS jobs use native PDF dependencies matching their
+architecture; the universal workflow combines both sets before building.
 The build does not commit a version bump back to the repository.
 Local builds keep the default `0.1.0` unless `-DTREPDF_VERSION=...` is supplied.
 
@@ -142,6 +155,16 @@ macOS SDK's system zlib,
 with the same architecture and deployment target as the app. Windows builds
 static zlib 1.3.1. libxlsxwriter is built from the vendored source.
 
+The manual `uat-macos-universal` workflow pins Qt **6.11.0** and macOS **13.0**.
+Two native jobs prepare the ARM64 and x86_64 dependencies independently, then
+the universal build combines matching PDFium, qpdf, Tesseract and Leptonica
+libraries with `lipo`. It builds TrePDF and libxlsxwriter with
+`CMAKE_OSX_ARCHITECTURES=arm64;x86_64` and deploys the universal Qt SDK.
+Packaging requires both slices in every bundled Mach-O file. Native startup
+checks run on both Apple Silicon and Intel runners before the final DMG, ZIP
+and their SHA-256 files are uploaded. This produces one universal app, with
+the same drag-to-Applications installer layout as the other macOS packages.
+
 The root `.gitattributes` preserves the exact bytes under `third_party/qpdf/`.
 This prevents Windows Git's `core.autocrlf` from converting headers to CRLF and
 breaking the checked-in `SHA256SUMS` verification. Keep this rule when updating
@@ -161,7 +184,7 @@ creating an additional package ZIP or `.sha256` file. The local
 `pipelines/build-windows.ps1` uses the same mode and leaves its runnable folder
 under `artifacts/local/windows-x64/`.
 
-`uat`, `uat-macos-intel` and `uat-ipad` use Node.js 24 releases of Checkout, Setup Python
+`uat`, `uat-macos-intel`, `uat-macos-universal` and `uat-ipad` use Node.js 24 releases of Checkout, Setup Python
 and Upload Artifact. Desktop Qt installation also uses a Node.js 24 action;
 Windows initializes MSVC directly through Visual Studio's Developer PowerShell
 instead of a JavaScript action. This runtime belongs to GitHub's build runner,
@@ -177,7 +200,7 @@ Windows uses aqtinstall pinned to upstream commit
 Windows repositories; released aqtinstall 3.3.0 cannot resolve those packages.
 macOS, Linux and the iPad workflow retain aqtinstall 3.3.0. Both macOS
 architectures use Qt's universal `clang_64` package; the workflow selects
-`arm64` or `x86_64` through `CMAKE_OSX_ARCHITECTURES`.
+`arm64`, `x86_64`, or both through `CMAKE_OSX_ARCHITECTURES`.
 
 After macOS deployment, packaging signs nested Mach-O files and frameworks from
 the inside out, then signs the complete app with an ad-hoc signature. It verifies
@@ -192,7 +215,7 @@ also agree. A macOS 13-only library therefore stops a macOS 12 job before it
 publishes an installer. In the macOS 12 jobs, qpdf, JPEG and OCR are built with
 the same target as the app.
 
-Both desktop workflows pass `--macos-dmg` to `package_uat.py` for their macOS
+The desktop workflows pass `--macos-dmg` to `package_uat.py` for their macOS
 jobs. macOS jobs install the pinned dependencies in
 [`requirements-macos-dmg.txt`](../scripts/ci/requirements-macos-dmg.txt):
 `dmgbuild` 1.6.7, `ds-store` 1.3.3 and `mac-alias` 2.2.3. Packaging creates a

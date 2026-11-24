@@ -7,10 +7,12 @@ import io
 import json
 import os
 from pathlib import Path
+import plistlib
+import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 import zipfile
 
 
@@ -129,7 +131,7 @@ class WindowsPackagingTests(unittest.TestCase):
                          f"{digest}  {archive.name}\n")
 
     def test_no_archive_rejects_non_windows_platforms(self):
-        for platform in ("macos-arm64", "macos-x64", "linux-x64"):
+        for platform in ("macos-arm64", "macos-x64", "macos-universal", "linux-x64"):
             with self.subTest(platform=platform):
                 arguments = self.arguments.copy()
                 arguments[2] = platform
@@ -138,6 +140,145 @@ class WindowsPackagingTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
         self.assertFalse(self.summary.exists())
         self.assertFalse(self.output.exists())
+
+
+class MacOSPackagingTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="trepdf-macos-package-test-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.stage = self.root / "TrePDF-0.0.1-macos-universal-qt6.11"
+        self.app = self.stage / "trepdf.app"
+        self.output = self.root / "output"
+        self.dependencies = self.root / "dependencies"
+        executable = self.app / "Contents/MacOS/trepdf"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"synthetic universal executable")
+        (self.app / "Contents/Info.plist").write_bytes(
+            plistlib.dumps({"LSMinimumSystemVersion": "13.0"}))
+        self.ocr = self.dependencies / "ocr"
+        for directory in (self.ocr / "share/tessdata", self.app / "Contents/Resources/tessdata"):
+            directory.mkdir(parents=True)
+            for name in ("eng.traineddata", "vie.traineddata", "pdf.ttf"):
+                (directory / name).write_bytes(name.encode())
+        (self.dependencies / "licenses").mkdir()
+        self.arguments = [str(SCRIPT), "--platform", "macos-universal", "--version", "0.0.1",
+                          "--variant", "qt6.11", "--stage", str(self.stage),
+                          "--dependencies", str(self.dependencies), "--output", str(self.output)]
+        self.set_platform("macos-universal")
+        self.environment = patch.dict(os.environ, {
+            "QT_VERSION": "6.11.0", "MACOS_DEPLOYMENT_TARGET": "13.0",
+        }, clear=True)
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
+    def set_platform(self, platform):
+        self.arguments[2] = platform
+        (self.dependencies / "manifest.json").write_text(json.dumps({
+            "platform": platform,
+            "roots": {"OCR_ROOT": str(self.ocr)},
+            "versions": {"pdfium": "fixture"},
+            "macos_deployment_target": "13.0",
+        }), encoding="utf-8")
+
+    def fake_ditto(self, command, *, check):
+        self.assertTrue(check)
+        if command[:2] == ["ditto", "-c"]:
+            source, destination = map(Path, command[-2:])
+            with zipfile.ZipFile(destination, "w") as archive:
+                for path in source.rglob("*"):
+                    if path.is_file():
+                        archive.write(path, path.relative_to(source.parent))
+        elif command[:2] == ["ditto", "-x"]:
+            with zipfile.ZipFile(command[-2]) as archive:
+                archive.extractall(command[-1])
+        else:
+            self.fail(f"Unexpected native command: {command}")
+
+    def run_package(self, *options):
+        with patch.object(sys, "argv", self.arguments + list(options)), \
+                contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            package_uat.main()
+
+    def test_universal_verifies_both_slices_and_packages_dmg_with_metadata(self):
+        def fake_dmg(stage, destination, version):
+            self.assertEqual((stage, version), (self.stage, "0.0.1"))
+            destination.write_bytes(b"synthetic disk image")
+
+        with patch.object(package_uat, "verify_tree") as verify, \
+                patch.object(package_uat, "sign_macos_bundle") as sign, \
+                patch.object(package_uat, "verify_macos_bundle") as verify_signature, \
+                patch.object(package_uat, "smoke_test") as smoke, \
+                patch.object(package_uat.subprocess, "run", side_effect=self.fake_ditto), \
+                patch.object(package_uat, "create_macos_dmg", side_effect=fake_dmg) as dmg:
+            self.run_package("--macos-dmg")
+        verify.assert_has_calls([call(self.app, "arm64", "13.0"),
+                                 call(self.app, "x86_64", "13.0")])
+        self.assertEqual(verify.call_count, 2)
+        sign.assert_called_once_with(self.app)
+        verify_signature.assert_called_once()
+        smoke.assert_called_once()
+        self.assertEqual(smoke.call_args.args[1], "macos-universal")
+        self.assertEqual(smoke.call_args.args[0].name, "trepdf")
+        self.assertIn(self.stage.name, str(smoke.call_args.args[0]))
+        dmg.assert_called_once()
+        metadata = json.loads((self.stage / "build-info.json").read_text())
+        self.assertEqual(metadata["platform"], "macos-universal")
+        self.assertEqual(metadata["macos_architectures"], ["arm64", "x86_64"])
+        self.assertEqual(metadata["macos_deployment_target"], "13.0")
+        self.assertEqual(metadata["qt"], "6.11.0")
+        self.assertIn("Intel and Apple Silicon", (self.stage / "START-HERE.txt").read_text())
+        for suffix in ("zip", "dmg"):
+            archive = self.output / f"TrePDF-0.0.1-macos-universal-qt6.11.{suffix}"
+            self.assertTrue(archive.is_file())
+            checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+            self.assertEqual(Path(str(archive) + ".sha256").read_text(),
+                             f"{checksum}  {archive.name}\n")
+
+    def test_missing_intel_slice_stops_signing_and_archiving(self):
+        with patch.object(package_uat, "verify_tree", side_effect=[
+                None, RuntimeError("missing x86_64 slice")]) as verify, \
+                patch.object(package_uat, "sign_macos_bundle") as sign, \
+                patch.object(package_uat.subprocess, "run") as native, \
+                patch.object(package_uat, "create_macos_dmg") as dmg:
+            with self.assertRaisesRegex(RuntimeError, "missing x86_64"):
+                self.run_package("--macos-dmg")
+        self.assertEqual(verify.call_args.args[1], "x86_64")
+        sign.assert_not_called()
+        native.assert_not_called()
+        dmg.assert_not_called()
+        self.assertFalse(self.output.exists())
+        self.assertFalse((self.stage / "build-info.json").exists())
+
+    def test_single_architecture_packages_keep_their_existing_checks(self):
+        for platform, architecture in (("macos-arm64", "arm64"), ("macos-x64", "x86_64")):
+            with self.subTest(platform=platform):
+                self.set_platform(platform)
+                with patch.object(package_uat, "verify_tree") as verify, \
+                        patch.object(package_uat, "sign_macos_bundle"), \
+                        patch.object(package_uat, "verify_macos_bundle"), \
+                        patch.object(package_uat, "smoke_test"), \
+                        patch.object(package_uat.subprocess, "run", side_effect=self.fake_ditto):
+                    self.run_package()
+                verify.assert_called_once_with(self.app, architecture, "13.0")
+                metadata = json.loads((self.stage / "build-info.json").read_text())
+                self.assertEqual(metadata["macos_architectures"], [architecture])
+
+    def test_universal_smoke_uses_cocoa_without_runner_library_paths(self):
+        with patch.object(package_uat.subprocess, "Popen") as launch, \
+                patch.dict(os.environ, {"QT_PLUGIN_PATH": "/runner/qt/plugins",
+                                        "DYLD_LIBRARY_PATH": "/runner/dependencies"}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            process = launch.return_value
+            process.wait.side_effect = [subprocess.TimeoutExpired("trepdf", 12), 0]
+            process.poll.return_value = None
+            package_uat.smoke_test(self.app / "Contents/MacOS/trepdf", "macos-universal")
+        environment = launch.call_args.kwargs["env"]
+        self.assertEqual(environment["QT_QPA_PLATFORM"], "cocoa")
+        self.assertNotIn("QT_PLUGIN_PATH", environment)
+        self.assertNotIn("DYLD_LIBRARY_PATH", environment)
+        process.terminate.assert_called_once()
 
 
 if __name__ == "__main__":
