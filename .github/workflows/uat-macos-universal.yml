@@ -1,14 +1,19 @@
 name: uat-macos-universal
-run-name: uat-macos-universal 0.0.${{ github.run_number }}
+run-name: uat-macos-universal ${{ inputs.version || format('0.0.{0}', github.run_number) }}
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'App version (e.g. 1.2.3). Leave blank for 0.0.<run number>.'
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 env:
-  TREPDF_VERSION: 0.0.${{ github.run_number }}
+  TREPDF_VERSION: ${{ inputs.version || format('0.0.{0}', github.run_number) }}
   TREPDF_PLATFORM: macos-universal
   TREPDF_PACKAGE: macos-universal-qt6.11
   QT_VERSION: '6.11.0'
@@ -45,6 +50,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+
+      - name: Validate app version
+        shell: bash
+        run: python scripts/ci/app_version.py --version="$TREPDF_VERSION"
 
       - name: Install build tools
         run: python -m pip install 'cmake==3.31.6' 'ninja==1.11.1.3'
