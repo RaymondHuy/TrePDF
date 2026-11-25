@@ -5,7 +5,8 @@ and Linux Release packages. The separate
 [`Tre PDF UAT - macOS Intel` workflow](../.github/workflows/uat-macos-intel.yml) builds only
 the Intel macOS packages. The
 [`Tre PDF UAT - macOS Universal` workflow](../.github/workflows/uat-macos-universal.yml)
-builds one Qt 6.11 package for both Intel and Apple Silicon Macs.
+builds installers for both Intel and Apple Silicon Macs. Choose Qt 6.8, 6.11,
+6.12 or all three in one run.
 Run any workflow independently; all SDKs and
 native dependencies are prepared on GitHub, with no local build required:
 
@@ -18,7 +19,9 @@ native dependencies are prepared on GitHub, with no local build required:
 | `Tre PDF UAT - macOS Intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.dmg` and `.zip` |
 | `Tre PDF UAT - macOS Intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.dmg` and `.zip` |
 | `Tre PDF UAT - macOS Intel` | `macos-x64-qt6.8` | `macos-15-intel` | Apple Clang x86_64, Qt 6.8.3 | `.dmg` and `.zip` |
-| `Tre PDF UAT - macOS Universal` | `macos-universal-qt6.11` | `macos-15` and `macos-15-intel` | Apple Clang, Qt 6.11.0 | Universal `.dmg` and `.zip` |
+| `Tre PDF UAT - macOS Universal` | `macos-universal-qt6.12` | `macos-15` and `macos-15-intel` | Qt 6.12.0, macOS 14.4+ | Universal `.dmg` and `.zip` |
+| `Tre PDF UAT - macOS Universal` | `macos-universal-qt6.11` | `macos-15` and `macos-15-intel` | Qt 6.11.0, macOS 13.0+ | Universal `.dmg` and `.zip` |
+| `Tre PDF UAT - macOS Universal` | `macos-universal-qt6.8` | `macos-15` and `macos-15-intel` | Qt 6.8.3, macOS 12.0+ | Universal `.dmg` and `.zip` |
 | `Tre PDF UAT` | `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
 
 Choose `macos-arm64` for Apple Silicon (M1 or newer), or `macos-x64` for Intel
@@ -37,8 +40,8 @@ deployment, binary minimum-OS metadata and startup on macOS 15; it does not
 replace feature testing on an actual macOS 12 machine. Test text editing,
 Save/reopen, forms, OCR and table export before distributing them widely.
 The `Tre PDF UAT` and `Tre PDF UAT - macOS Intel` macOS packages contain one architecture.
-Choose `macos-universal-qt6.11` for a single installer that runs natively on
-both Intel and Apple Silicon, with macOS 13.0 or newer.
+Choose the Universal package for your minimum macOS version when distributing
+one installer to both Intel and Apple Silicon users.
 Intel jobs run natively on GitHub's
 [`macos-15-intel` runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 The Linux package targets Ubuntu 24.04
@@ -55,6 +58,8 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
    Apple Silicon and Linux, choose **Actions → Tre PDF UAT → Run workflow** instead.
    For one installer supporting both Mac architectures, choose
    **Actions → Tre PDF UAT - macOS Universal → Run workflow**.
+   In that workflow, select **Qt series** (`6.8`, `6.11`, `6.12` or `all`).
+   The default is `6.11`.
    Select the branch. Enter an optional **version** such as `1.2.3`, or leave
    it blank to use `0.0.<run number>`, then start the run.
 3. On macOS, download the `TrePDF-<version>-<package>.dmg` entry under **Artifacts**
@@ -64,8 +69,8 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
    the `-qt6.8.dmg` package for your architecture, for example
    `TrePDF-0.0.x-macos-arm64-qt6.8.dmg` on Apple Silicon. The matching
    `.dmg.sha256` entry is a separate direct download for checksum verification.
-   For example, entering `1.2.3` in the universal workflow produces
-   `TrePDF-1.2.3-macos-universal-qt6.11.dmg` for either Mac architecture.
+   For example, selecting `6.8` and entering version `1.2.3` produces
+   `TrePDF-1.2.3-macos-universal-qt6.8.dmg` for either Mac architecture.
 4. To verify the DMG, save its `.dmg.sha256` file in the same directory and run
    the following command there, replacing the filename with your package:
 
@@ -119,8 +124,9 @@ another pushed branch; select the Intel run when `gh run watch` prompts.
 All five manual workflows accept a `version` input in numeric `major.minor.patch`
 format without leading zeros. All packages in a run use the same version.
 The desktop app shows it on the **Information** tab. For example, to build
-the universal installer and display **Version 1.2.3**, run
-`gh workflow run uat-macos-universal.yml -f version=1.2.3`.
+the Qt 6.12 Universal installer and display **Version 1.2.3**, run
+`gh workflow run uat-macos-universal.yml -f qt=6.12 -f version=1.2.3`.
+Use `-f qt=all` to build all three installers with the same app version.
 
 With the field empty, each workflow uses its own `0.0.${{ github.run_number }}`
 sequence. **Re-run jobs** retains the original version in either mode.
@@ -157,8 +163,8 @@ macOS SDK's system zlib,
 with the same architecture and deployment target as the app. Windows builds
 static zlib 1.3.1. libxlsxwriter is built from the vendored source.
 
-The manual `Tre PDF UAT - macOS Universal` workflow pins Qt **6.11.0** and macOS **13.0**.
-Two native jobs prepare the ARM64 and x86_64 dependencies independently, then
+For each selected Qt series, two native jobs prepare the ARM64 and x86_64
+dependencies for that series' minimum macOS version. Then
 the universal build combines matching PDFium, qpdf, Tesseract and Leptonica
 libraries with `lipo`. It builds TrePDF and libxlsxwriter with
 `CMAKE_OSX_ARCHITECTURES=arm64;x86_64` and deploys the universal Qt SDK.

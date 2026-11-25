@@ -58,9 +58,9 @@ every feature has been verified on every platform.
 | iPad | Separate iOS build and `Tre PDF UAT - iPad` workflow; see the [iPad guide](docs/ipad-build.md). |
 | Browser | Separate WebAssembly preview with a smaller feature set; see the [web guide](docs/web-build.md). |
 
-The macOS workflows offer separate ARM64 and Intel packages and a Qt 6.11
-universal installer for both architectures. The current desktop workflows configure Qt 6.12 packages
-for macOS 14.4+, with Qt 6.11 variants targeting macOS 13+.
+The macOS workflows offer ARM64, Intel and Universal installers for each Qt series.
+Each Universal installer contains both architectures. Qt 6.12 targets macOS 14.4+
+and Qt 6.11 targets macOS 13+.
 The Qt 6.8.3 compatibility variants target macOS 12+ on both
 architectures, using a separate PDFium pin and native dependency builds.
 They need UAT on macOS 12; the GitHub runners use macOS 15.
