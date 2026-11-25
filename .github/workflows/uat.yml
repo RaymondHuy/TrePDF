@@ -1,5 +1,5 @@
-name: uat
-run-name: uat ${{ inputs.version || format('0.0.{0}', github.run_number) }}
+name: Tre PDF UAT
+run-name: Tre PDF UAT ${{ inputs.version || format('0.0.{0}', github.run_number) }}
 
 on:
   workflow_dispatch:
@@ -172,7 +172,7 @@ jobs:
           cmake --install build/uat --config Release \
             --prefix "$PWD/build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE"
 
-      - name: Sign, notarize and verify macOS downloads
+      - name: Verify Tre PDF app name, sign and notarize macOS downloads
         if: runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
@@ -222,7 +222,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
+          name: Tre PDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
           path: build/stage/TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}/
           if-no-files-found: error
           compression-level: 0
@@ -232,7 +232,7 @@ jobs:
         if: runner.os != 'Windows'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
+          name: Tre PDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
           path: |
             artifacts/*
             !artifacts/*.dmg
