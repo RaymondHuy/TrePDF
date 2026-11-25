@@ -69,7 +69,7 @@ def create_macos_dmg(stage: Path, destination: Path, version: str, *, notarized_
             "scripts/ci/requirements-macos-dmg.txt") from error
     from importlib.metadata import distribution
 
-    locations = {"trepdf.app": (140, 120), "Applications": (500, 120),
+    locations = {"Tre PDF.app": (140, 120), "Applications": (500, 120),
                  "Read Me": (320, 320)}
     with tempfile.TemporaryDirectory(prefix="trepdf-dmg-") as temporary:
         # Keep the signed app and ZIP staging tree unchanged. Ancillary files
@@ -77,7 +77,7 @@ def create_macos_dmg(stage: Path, destination: Path, version: str, *, notarized_
         support = Path(temporary) / "Read Me"
         support.mkdir()
         for item in sorted(stage.iterdir()):
-            if item.name != "trepdf.app":
+            if item.name != "Tre PDF.app":
                 subprocess.run(["ditto", str(item), str(support / item.name)], check=True)
         # The built-in background is redistributed with the image.
         package = distribution("dmgbuild")
@@ -86,10 +86,10 @@ def create_macos_dmg(stage: Path, destination: Path, version: str, *, notarized_
         license_directory.mkdir(parents=True, exist_ok=True)
         shutil.copy2(package.locate_file(notice), license_directory / "LICENSE")
         # Do not set hide_extensions: it adds FinderInfo to the signed .app.
-        build_dmg(str(destination), f"TrePDF {version}", settings={
+        build_dmg(str(destination), f"Tre PDF {version}", settings={
             "format": "UDZO",
             "filesystem": "HFS+",
-            "files": [str(stage / "trepdf.app"), str(support)],
+            "files": [str(stage / "Tre PDF.app"), str(support)],
             "symlinks": {"Applications": "/Applications"},
             "background": "builtin-arrow",
             "window_rect": ((100, 100), (640, 420)),
@@ -112,9 +112,9 @@ def create_macos_dmg(stage: Path, destination: Path, version: str, *, notarized_
         subprocess.run(["hdiutil", "attach", str(destination), "-readonly", "-nobrowse",
                         "-mountpoint", str(mount)], check=True)
         try:
-            verify_macos_bundle(mount / "trepdf.app")
+            verify_macos_bundle(mount / "Tre PDF.app")
             if notarized_app:
-                subprocess.run(["xcrun", "stapler", "validate", str(mount / "trepdf.app")], check=True)
+                subprocess.run(["xcrun", "stapler", "validate", str(mount / "Tre PDF.app")], check=True)
             shortcut = mount / "Applications"
             if not shortcut.is_symlink() or os.readlink(shortcut) != "/Applications":
                 raise RuntimeError("DMG is missing its Applications shortcut")
@@ -214,10 +214,10 @@ def main() -> None:
     if manifest["platform"] != args.platform:
         parser.error("Dependency manifest does not match the package platform")
     executable = stage / {
-        "windows-x64": "bin/trepdf.exe",
-        "macos-arm64": "trepdf.app/Contents/MacOS/trepdf",
-        "macos-x64": "trepdf.app/Contents/MacOS/trepdf",
-        "macos-universal": "trepdf.app/Contents/MacOS/trepdf",
+        "windows-x64": "bin/Tre PDF.exe",
+        "macos-arm64": "Tre PDF.app/Contents/MacOS/Tre PDF",
+        "macos-x64": "Tre PDF.app/Contents/MacOS/Tre PDF",
+        "macos-universal": "Tre PDF.app/Contents/MacOS/Tre PDF",
         "linux-x64": "bin/trepdf",
     }[args.platform]
     if not executable.is_file():
@@ -249,8 +249,11 @@ def main() -> None:
         configured_target = os.environ.get("MACOS_DEPLOYMENT_TARGET", deployment_target)
         if version_tuple(configured_target) != version_tuple(deployment_target):
             raise RuntimeError("Dependency and application macOS deployment targets differ")
-        with (stage / "trepdf.app/Contents/Info.plist").open("rb") as stream:
+        with (stage / "Tre PDF.app/Contents/Info.plist").open("rb") as stream:
             info = plistlib.load(stream)
+        for key in ("CFBundleName", "CFBundleDisplayName", "CFBundleExecutable"):
+            if info.get(key) != "Tre PDF":
+                raise RuntimeError(f"macOS {key} must be 'Tre PDF', found {info.get(key)!r}")
         bundle_version = info.get("CFBundleShortVersionString")
         if bundle_version != args.version:
             raise RuntimeError(f"Built app version {bundle_version!r} differs from package version {args.version!r}")
@@ -258,9 +261,9 @@ def main() -> None:
         if version_tuple(app_target) != version_tuple(deployment_target):
             raise RuntimeError("Bundle minimum macOS version does not match its deployment target")
         for architecture in MACOS_ARCHITECTURES[args.platform]:
-            verify_tree(stage / "trepdf.app", architecture, deployment_target)
+            verify_tree(stage / "Tre PDF.app", architecture, deployment_target)
         if not args.macos_notarize:
-            sign_macos_bundle(stage / "trepdf.app")
+            sign_macos_bundle(stage / "Tre PDF.app")
         processor = {
             "macos-arm64": "Apple Silicon",
             "macos-x64": "Intel",
@@ -278,12 +281,12 @@ def main() -> None:
             f"Minimum macOS: {deployment_target}\n"
             f"Qt: {os.environ.get('QT_VERSION', 'local')}\n\n"
             f"{signing_note}\n"
-            "After verifying the package SHA-256, open the DMG and drag trepdf.app\n"
-            "to Applications, or extract the ZIP and open trepdf.app.\n"
+            "After verifying the package SHA-256, open the DMG and drag Tre PDF.app\n"
+            "to Applications, or extract the ZIP and open Tre PDF.app.\n"
             f"{first_launch}"
             "If signature verification fails or it is reported as damaged, do not\n"
             "override that warning; download a newly built package.\n\n"
-            "Verify the app: codesign --verify --deep --strict /path/to/trepdf.app\n"
+            'Verify the app: codesign --verify --deep --strict "/path/to/Tre PDF.app"\n'
             "https://support.apple.com/en-us/102445\n", encoding="utf-8")
     else:
         smoke_test(executable, args.platform)
@@ -319,7 +322,7 @@ def main() -> None:
         if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
             with open(summary, "a", encoding="utf-8") as stream:
                 stream.write(f"### TrePDF {args.version} — {package}\n\n")
-                stream.write("- Deployed application folder; launch `bin/trepdf.exe`.\n")
+                stream.write(f"- Deployed application folder; launch `{executable.relative_to(stage).as_posix()}`.\n")
                 stream.write("- No package ZIP or archive checksum was created.\n\n")
                 stream.write("Release build, runtime deployment and startup smoke check passed.\n")
         return
@@ -329,7 +332,7 @@ def main() -> None:
     if args.macos_dmg:
         dmg = Path(str(archive_base) + ".dmg")
         if args.macos_notarize:
-            app = stage / "trepdf.app"
+            app = stage / "Tre PDF.app"
             with signing_assets(credentials) as (identity, auth):
                 sign_macos_bundle(app, identity)
                 with tempfile.TemporaryDirectory(prefix="trepdf-notary-") as temporary:
@@ -353,12 +356,12 @@ def main() -> None:
         # Test what a recipient extracts, including the resource seal and symlinks.
         with tempfile.TemporaryDirectory(prefix="trepdf-archive-check-") as temporary:
             subprocess.run(["ditto", "-x", "-k", str(archive), temporary], check=True)
-            restored_app = Path(temporary) / stage.name / "trepdf.app"
+            restored_app = Path(temporary) / stage.name / "Tre PDF.app"
             verify_macos_bundle(restored_app)
             if args.macos_notarize:
                 subprocess.run(["xcrun", "stapler", "validate", str(restored_app)], check=True)
                 subprocess.run(["spctl", "--assess", "--type", "execute", str(restored_app)], check=True)
-            smoke_test(restored_app / "Contents/MacOS/trepdf", args.platform)
+            smoke_test(restored_app / "Contents/MacOS/Tre PDF", args.platform)
     else:
         archive = Path(shutil.make_archive(str(archive_base),
                        "zip" if args.platform == "windows-x64" else "gztar",

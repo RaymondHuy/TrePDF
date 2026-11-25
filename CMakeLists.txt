@@ -181,6 +181,11 @@ qt_add_resources(trepdf "trepdf_app_icon"
     FILES src/assets/branding/TrePDF-icon-512.png
 )
 
+if(WIN32 OR (APPLE AND NOT IOS))
+    set(TREPDF_DESKTOP_APP_NAME "Tre PDF")
+    set_target_properties(trepdf PROPERTIES OUTPUT_NAME "${TREPDF_DESKTOP_APP_NAME}")
+endif()
+
 if(APPLE AND NOT IOS)
     set(TREPDF_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/branding/TrePDF.icns")
     set_source_files_properties("${TREPDF_MACOS_ICON}" PROPERTIES
@@ -188,6 +193,7 @@ if(APPLE AND NOT IOS)
     )
     target_sources(trepdf PRIVATE "${TREPDF_MACOS_ICON}")
     set_target_properties(trepdf PROPERTIES
+        MACOSX_BUNDLE_BUNDLE_NAME "${TREPDF_DESKTOP_APP_NAME}"
         MACOSX_BUNDLE_ICON_FILE "TrePDF.icns"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TrePDFInfo.plist.in"
     )
@@ -577,8 +583,8 @@ target_link_libraries(trepdf
 if(NOT IOS)
     if(APPLE)
         set(TREPDF_OCR_RUNTIME_DATA "$<TARGET_BUNDLE_DIR:trepdf>/Contents/Resources/tessdata")
-        install(DIRECTORY "${TREPDF_OCR_DATA_DIR}/" DESTINATION "trepdf.app/Contents/Resources/tessdata")
-        install(DIRECTORY "${OCR_ROOT}/licenses/" DESTINATION "trepdf.app/Contents/Resources/licenses/ocr")
+        install(DIRECTORY "${TREPDF_OCR_DATA_DIR}/" DESTINATION "${TREPDF_DESKTOP_APP_NAME}.app/Contents/Resources/tessdata")
+        install(DIRECTORY "${OCR_ROOT}/licenses/" DESTINATION "${TREPDF_DESKTOP_APP_NAME}.app/Contents/Resources/licenses/ocr")
     else()
         set(TREPDF_OCR_RUNTIME_DATA "$<TARGET_FILE_DIR:trepdf>/tessdata")
         install(DIRECTORY "${TREPDF_OCR_DATA_DIR}/" DESTINATION "${CMAKE_INSTALL_BINDIR}/tessdata")

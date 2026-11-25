@@ -16,11 +16,11 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "TreOffice\0"
-            VALUE "FileDescription", "TrePDF\0"
+            VALUE "FileDescription", "@TREPDF_DESKTOP_APP_NAME@\0"
             VALUE "FileVersion", "@PROJECT_VERSION@\0"
             VALUE "InternalName", "trepdf\0"
-            VALUE "OriginalFilename", "trepdf.exe\0"
-            VALUE "ProductName", "TrePDF\0"
+            VALUE "OriginalFilename", "@TREPDF_DESKTOP_APP_NAME@.exe\0"
+            VALUE "ProductName", "@TREPDF_DESKTOP_APP_NAME@\0"
             VALUE "ProductVersion", "@PROJECT_VERSION@\0"
         END
     END

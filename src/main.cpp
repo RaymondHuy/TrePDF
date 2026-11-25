@@ -48,6 +48,10 @@ int main(int argc, char *argv[])
     platformService->enqueueArguments(QCoreApplication::arguments().mid(1));
 
     QCoreApplication::setApplicationName(QStringLiteral("TrePDF"));
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
+    // Keep the application name stable for existing settings and user data.
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("Tre PDF"));
+#endif
     QCoreApplication::setApplicationVersion(QStringLiteral(TREPDF_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("TreOffice"));
     // Cocoa uses the bundle's ICNS, including when its executable is launched

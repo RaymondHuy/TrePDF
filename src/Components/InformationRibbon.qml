@@ -37,8 +37,7 @@ Flickable {
             spacing: 4
 
             Label {
-                //% "TrePDF"
-                text: qsTrId("ApplicationTitle")
+                text: Application.displayName
                 color: root.theme.ribbonTextColor
                 font.pixelSize: 17
                 font.weight: Font.DemiBold

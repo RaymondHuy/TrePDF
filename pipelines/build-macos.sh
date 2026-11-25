@@ -175,4 +175,4 @@ cmake --build "$build_dir" --target trepdf --parallel "$parallel"
 cmake --install "$build_dir" --config Release --prefix "$stage_dir"
 "$python_bin" scripts/ci/package_uat.py --platform "$platform" --version "$version" \
     --stage "$stage_dir" --dependencies "$deps_dir" --output "$output_dir"
-printf '\nBuild complete.\nApp: %s/trepdf.app\nZIP: %s\nChecksum: %s.sha256\n' "$stage_dir" "$archive" "$archive"
+printf '\nBuild complete.\nApp: %s/Tre PDF.app\nZIP: %s\nChecksum: %s.sha256\n' "$stage_dir" "$archive" "$archive"

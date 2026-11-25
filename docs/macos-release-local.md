@@ -55,16 +55,16 @@ They do not run the test suite.
 After the build completes successfully, open the bundle:
 
 ```sh
-open cmake-build-release/trepdf.app
+open "cmake-build-release/Tre PDF.app"
 ```
 
 To see application output in Terminal instead:
 
 ```sh
-./cmake-build-release/trepdf.app/Contents/MacOS/trepdf
+"./cmake-build-release/Tre PDF.app/Contents/MacOS/Tre PDF"
 ```
 
-The build result is `cmake-build-release/trepdf.app` inside your checkout.
+The build result is `cmake-build-release/Tre PDF.app` inside your checkout.
 Quit any running Debug build before checking the Release application so the
 windows are easy to distinguish.
 
@@ -136,7 +136,7 @@ language list is independent of the application's catalogs.
 
 ## Create a local DMG
 
-A `.dmg` is a disk image containing `trepdf.app` and an Applications shortcut.
+A `.dmg` is a disk image containing `Tre PDF.app` and an Applications shortcut.
 Open the image and drag the application onto that shortcut to install it.
 TrePDF does not need a `.pkg` installer for this workflow.
 
@@ -172,7 +172,7 @@ packaged application for about 12 seconds and then closes that test process.
   "$trepdf_cmake" --install cmake-build-release --config Release \
     --prefix "$trepdf_stage"
 
-  python3 -B - "$trepdf_stage/trepdf.app" <<'PY'
+  python3 -B - "$trepdf_stage/Tre PDF.app" <<'PY'
 from pathlib import Path
 import runpy
 import sys
@@ -180,12 +180,12 @@ import sys
 helpers = runpy.run_path("scripts/ci/package_uat.py")
 app = Path(sys.argv[1]).resolve()
 helpers["sign_macos_bundle"](app)
-helpers["smoke_test"](app / "Contents/MacOS/trepdf", "macos-arm64")
+helpers["smoke_test"](app / "Contents/MacOS/Tre PDF", "macos-arm64")
 PY
 
   ln -s /Applications "$trepdf_stage/Applications"
   trepdf_dmg="$trepdf_package_dir/TrePDF-macos-arm64.dmg"
-  hdiutil create -volname TrePDF -srcfolder "$trepdf_stage" \
+  hdiutil create -volname "Tre PDF" -srcfolder "$trepdf_stage" \
     -format UDZO "$trepdf_dmg"
   hdiutil verify "$trepdf_dmg"
   printf '\nDMG created: %s\n' "$trepdf_dmg"
@@ -218,13 +218,13 @@ dependencies and builds on GitHub's `macos-15-intel` runner. Use this route when
 your development Mac is Apple Silicon:
 
 1. Ensure the branch on GitHub contains the source changes you want to package.
-2. Open **Actions → uat-macos-intel → Run workflow** and select that branch.
+2. Open **Actions → Tre PDF UAT - macOS Intel → Run workflow** and select that branch.
 3. After the Intel job succeeds, download its DMG directly under **Artifacts**:
    - `TrePDF-0.0.x-macos-x64.dmg` for macOS 14.4 or newer (Qt 6.12).
    - `TrePDF-0.0.x-macos-x64-qt6.11.dmg` for macOS 13 or newer (Qt 6.11).
 4. Download the matching `.dmg.sha256` entry to verify the checksum, then open
-   the DMG and drag `trepdf.app` onto its Applications shortcut. There is no
-   outer ZIP to extract for these entries. Eject the image and launch TrePDF
+   the DMG and drag `Tre PDF.app` onto its Applications shortcut. There is no
+   outer ZIP to extract for these entries. Eject the image and launch Tre PDF
    from Applications. The artifact without the `.dmg` extension remains a ZIP
    fallback. The DMG's **Read Me** folder holds the notices and
    `START-HERE.txt`; keep them with the package when sharing it. See the
@@ -234,7 +234,7 @@ After pushing the direct-download workflow changes, start a new **Run workflow**
 on the updated branch. Re-running an older job retains its old workflow.
 
 This workflow launches only the two Intel jobs. Windows, Apple Silicon and Linux
-remain in the independent `uat` workflow. Each macOS job produces a separate
+remain in the independent `Tre PDF UAT` workflow. Each macOS job produces a separate
 DMG and ZIP, each with its own checksum; these are architecture-specific
 packages. The GitHub jobs use [Developer ID signing and notarization](github-uat.md#macos-signing-and-notarization). Each workflow has its own
 `0.0.x` version counter. The local `pipelines/build-macos.sh` script continues

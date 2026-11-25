@@ -51,11 +51,11 @@ every feature has been verified on every platform.
 
 | Platform | Build path |
 | --- | --- |
-| macOS, Apple Silicon | Bundled ARM64 dependencies, local CMake build, and the `uat` workflow. |
-| macOS, Intel | Native dependency preparation and the separate `uat-macos-intel` workflow. |
-| Windows x64 | Local MSVC packaging script and the `uat` workflow; a separate MinGW setup guide is available. |
-| Linux x64 | Ubuntu 24.04 build and packaging recipe in the `uat` workflow. |
-| iPad | Separate iOS build and `uat-ipad` workflow; see the [iPad guide](docs/ipad-build.md). |
+| macOS, Apple Silicon | Bundled ARM64 dependencies, local CMake build, and the `Tre PDF UAT` workflow. |
+| macOS, Intel | Native dependency preparation and the separate `Tre PDF UAT - macOS Intel` workflow. |
+| Windows x64 | Local MSVC packaging script and the `Tre PDF UAT` workflow; a separate MinGW setup guide is available. |
+| Linux x64 | Ubuntu 24.04 build and packaging recipe in the `Tre PDF UAT` workflow. |
+| iPad | Separate iOS build and `Tre PDF UAT - iPad` workflow; see the [iPad guide](docs/ipad-build.md). |
 | Browser | Separate WebAssembly preview with a smaller feature set; see the [web guide](docs/web-build.md). |
 
 The macOS workflows offer separate ARM64 and Intel packages and a Qt 6.11
@@ -122,7 +122,7 @@ cmake -S . -B build -G Ninja \
   -DOCR_ROOT="$PWD/third_party/ocr"
 
 cmake --build build --target trepdf --parallel 4
-./build/trepdf.app/Contents/MacOS/trepdf
+"./build/Tre PDF.app/Contents/MacOS/Tre PDF"
 ```
 
 Re-run the build command after editing source. Use a separate build directory
@@ -154,7 +154,7 @@ SDK, a Qt MSVC x64 kit, Python 3.12+, CMake, and Ninja. Replace the example Qt p
 ```
 
 Windows output is `artifacts/local/windows-x64/TrePDF-<version>-windows-x64/`.
-Run `bin/trepdf.exe` inside it and keep the entire folder together with its
+Run `bin/Tre PDF.exe` inside it and keep the entire folder together with its
 deployed libraries and resources. The Windows script creates no ZIP or archive
 checksum. macOS packages remain under `artifacts/local/<platform>/`.
 These scripts build Release applications with tests disabled. For Linux or custom
