@@ -739,10 +739,24 @@ if(TREPDF_DEPLOY_RUNTIME AND NOT IOS)
         list(APPEND TREPDF_DEPLOY_PLUGIN_OPTIONS
             INCLUDE_PLUGINS qsvg qsvgicon qoffscreen)
     endif()
-    qt_generate_deploy_qml_app_script(
-        TARGET trepdf
-        OUTPUT_SCRIPT TREPDF_DEPLOY_SCRIPT
-        ${TREPDF_DEPLOY_PLUGIN_OPTIONS}
-    )
-    install(SCRIPT ${TREPDF_DEPLOY_SCRIPT})
+    if(APPLE AND Qt6_VERSION VERSION_LESS 6.9 AND QT6_IS_SHARED_LIBS_BUILD)
+        # Qt 6.8's QML deploy generator emits an unquoted bundle name.
+        qt6_generate_deploy_script(
+            TARGET trepdf
+            OUTPUT_SCRIPT TREPDF_DEPLOY_SCRIPT
+            CONTENT [[
+qt6_deploy_qml_imports(TARGET trepdf PLUGINS_FOUND qml_plugins)
+qt6_deploy_runtime_dependencies(
+    EXECUTABLE "$<TARGET_FILE_NAME:trepdf>.app"
+    ADDITIONAL_MODULES ${qml_plugins}
+)
+]])
+    else()
+        qt_generate_deploy_qml_app_script(
+            TARGET trepdf
+            OUTPUT_SCRIPT TREPDF_DEPLOY_SCRIPT
+            ${TREPDF_DEPLOY_PLUGIN_OPTIONS}
+        )
+    endif()
+    install(SCRIPT "${TREPDF_DEPLOY_SCRIPT}")
 endif()
