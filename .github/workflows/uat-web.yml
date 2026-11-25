@@ -1,5 +1,5 @@
-name: uat-web
-run-name: uat-web ${{ inputs.version || format('0.0.{0}', github.run_number) }}
+name: Tre PDF UAT - Web
+run-name: Tre PDF UAT - Web ${{ inputs.version || format('0.0.{0}', github.run_number) }}
 
 on:
   workflow_dispatch:
@@ -98,7 +98,7 @@ jobs:
       - name: Upload website package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: TrePDF-${{ env.TREPDF_VERSION }}-web-wasm
+          name: Tre PDF-${{ env.TREPDF_VERSION }}-web-wasm
           path: artifacts/web/*
           if-no-files-found: error
           compression-level: 0
