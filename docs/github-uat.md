@@ -1,25 +1,25 @@
 # Manual UAT builds
 
-The [`uat` workflow](../.github/workflows/uat.yml) builds Windows, Apple Silicon
+The [`Tre PDF UAT` workflow](../.github/workflows/uat.yml) builds Windows, Apple Silicon
 and Linux Release packages. The separate
-[`uat-macos-intel` workflow](../.github/workflows/uat-macos-intel.yml) builds only
+[`Tre PDF UAT - macOS Intel` workflow](../.github/workflows/uat-macos-intel.yml) builds only
 the Intel macOS packages. The
-[`uat-macos-universal` workflow](../.github/workflows/uat-macos-universal.yml)
+[`Tre PDF UAT - macOS Universal` workflow](../.github/workflows/uat-macos-universal.yml)
 builds one Qt 6.11 package for both Intel and Apple Silicon Macs.
 Run any workflow independently; all SDKs and
 native dependencies are prepared on GitHub, with no local build required:
 
 | Workflow | Package | GitHub runner | Toolchain | Output |
 | --- | --- | --- | --- | --- |
-| `uat` | `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | Application-folder artifact, launch `bin/trepdf.exe` |
-| `uat` | `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.dmg` and `.zip` |
-| `uat` | `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.dmg` and `.zip` |
-| `uat` | `macos-arm64-qt6.8` | `macos-15` | Apple Clang, Qt 6.8.3 | `.dmg` and `.zip` |
-| `uat-macos-intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.dmg` and `.zip` |
-| `uat-macos-intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.dmg` and `.zip` |
-| `uat-macos-intel` | `macos-x64-qt6.8` | `macos-15-intel` | Apple Clang x86_64, Qt 6.8.3 | `.dmg` and `.zip` |
-| `uat-macos-universal` | `macos-universal-qt6.11` | `macos-15` and `macos-15-intel` | Apple Clang, Qt 6.11.0 | Universal `.dmg` and `.zip` |
-| `uat` | `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
+| `Tre PDF UAT` | `windows-x64` | `windows-2022` | MSVC 2022 x64, Qt 6.12.0 | Application-folder artifact, launch `bin/Tre PDF.exe` |
+| `Tre PDF UAT` | `macos-arm64` | `macos-15` | Apple Clang, Qt 6.12.0 | `.dmg` and `.zip` |
+| `Tre PDF UAT` | `macos-arm64-qt6.11` | `macos-15` | Apple Clang, Qt 6.11.0 | `.dmg` and `.zip` |
+| `Tre PDF UAT` | `macos-arm64-qt6.8` | `macos-15` | Apple Clang, Qt 6.8.3 | `.dmg` and `.zip` |
+| `Tre PDF UAT - macOS Intel` | `macos-x64` | `macos-15-intel` | Apple Clang x86_64, Qt 6.12.0 | `.dmg` and `.zip` |
+| `Tre PDF UAT - macOS Intel` | `macos-x64-qt6.11` | `macos-15-intel` | Apple Clang x86_64, Qt 6.11.0 | `.dmg` and `.zip` |
+| `Tre PDF UAT - macOS Intel` | `macos-x64-qt6.8` | `macos-15-intel` | Apple Clang x86_64, Qt 6.8.3 | `.dmg` and `.zip` |
+| `Tre PDF UAT - macOS Universal` | `macos-universal-qt6.11` | `macos-15` and `macos-15-intel` | Apple Clang, Qt 6.11.0 | Universal `.dmg` and `.zip` |
+| `Tre PDF UAT` | `linux-x64` | `ubuntu-24.04` | GCC, Qt 6.12.0 | `.tar.gz`, run `./TrePDF.sh` |
 
 Choose `macos-arm64` for Apple Silicon (M1 or newer), or `macos-x64` for Intel
 Macs. Both Qt 6.12 packages require macOS 14.4 or newer,
@@ -36,7 +36,7 @@ These are beta compatibility builds. A successful GitHub run verifies build,
 deployment, binary minimum-OS metadata and startup on macOS 15; it does not
 replace feature testing on an actual macOS 12 machine. Test text editing,
 Save/reopen, forms, OCR and table export before distributing them widely.
-The `uat` and `uat-macos-intel` macOS packages contain one architecture.
+The `Tre PDF UAT` and `Tre PDF UAT - macOS Intel` macOS packages contain one architecture.
 Choose `macos-universal-qt6.11` for a single installer that runs natively on
 both Intel and Apple Silicon, with macOS 13.0 or newer.
 Intel jobs run natively on GitHub's
@@ -51,10 +51,10 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
 1. Commit and push the workflow, CI scripts and associated CMake/version changes.
    The workflow must exist on the default branch for GitHub to show its manual
    dispatch control.
-2. For Intel, open **Actions → uat-macos-intel → Run workflow**. For Windows,
-   Apple Silicon and Linux, choose **Actions → uat → Run workflow** instead.
+2. For Intel, open **Actions → Tre PDF UAT - macOS Intel → Run workflow**. For Windows,
+   Apple Silicon and Linux, choose **Actions → Tre PDF UAT → Run workflow** instead.
    For one installer supporting both Mac architectures, choose
-   **Actions → uat-macos-universal → Run workflow**.
+   **Actions → Tre PDF UAT - macOS Universal → Run workflow**.
    Select the branch. Enter an optional **version** such as `1.2.3`, or leave
    it blank to use `0.0.<run number>`, then start the run.
 3. On macOS, download the `TrePDF-<version>-<package>.dmg` entry under **Artifacts**
@@ -73,20 +73,20 @@ profile documented in [windows-clion.md](windows-clion.md) is unchanged.
    shasum -a 256 -c TrePDF-0.0.x-macos-arm64.dmg.sha256
    ```
 
-   Open the `.dmg`: TrePDF appears on the left, with an arrow pointing to the
+   Open the `.dmg`: Tre PDF appears on the left, with an arrow pointing to the
    **Applications** shortcut on the right. Drag the app onto that shortcut,
-   eject the disk image and open TrePDF from Applications. Open
+   eject the disk image and open Tre PDF from Applications. Open
    `Read Me/START-HERE.txt` inside the image for signature verification and
    first-launch instructions.
 
-The `TrePDF-0.0.x-<package>` artifact without a filename extension remains the
+The `Tre PDF-0.0.x-<package>` artifact without a filename extension remains the
 ZIP fallback on macOS: extract that artifact, then the package ZIP inside it.
 It contains the ZIP and its checksum, while the DMG and DMG checksum have their
 own entries. On Linux, download this package artifact and extract the platform
 archive before launching the app.
 
-On Windows, download `TrePDF-0.0.x-windows-x64` and extract the GitHub artifact
-once, then run `bin/trepdf.exe`. The workflow uploads the deployed application
+On Windows, download `Tre PDF-0.0.x-windows-x64` and extract the GitHub artifact
+once, then run `bin/Tre PDF.exe`. The workflow uploads the deployed application
 folder directly, so there is no second package ZIP or archive checksum inside.
 GitHub's artifact download still wraps the folder in a ZIP. Keep all extracted
 libraries, plugins and resources together with the executable.
@@ -133,6 +133,10 @@ directory, artifact, ZIP, DMG and checksums; for example, Qt 6.8 metadata record
 `qt: 6.8.3`, `variant: qt6.8` and `macos_deployment_target: 12.0`.
 The single-architecture macOS jobs use native PDF dependencies matching their
 architecture; the universal workflow combines both sets before building.
+All macOS jobs verify that the bundle name, display name and executable name
+are `Tre PDF` before signing and packaging. GitHub artifact labels use `Tre PDF`;
+package filenames keep the `TrePDF-<version>-<package>` prefix used by the upload
+and checksum steps.
 The build does not commit a version bump back to the repository.
 Local builds keep the default `0.1.0` unless `-DTREPDF_VERSION=...` is supplied.
 
@@ -153,7 +157,7 @@ macOS SDK's system zlib,
 with the same architecture and deployment target as the app. Windows builds
 static zlib 1.3.1. libxlsxwriter is built from the vendored source.
 
-The manual `uat-macos-universal` workflow pins Qt **6.11.0** and macOS **13.0**.
+The manual `Tre PDF UAT - macOS Universal` workflow pins Qt **6.11.0** and macOS **13.0**.
 Two native jobs prepare the ARM64 and x86_64 dependencies independently, then
 the universal build combines matching PDFium, qpdf, Tesseract and Leptonica
 libraries with `lipo`. It builds TrePDF and libxlsxwriter with
@@ -182,7 +186,7 @@ creating an additional package ZIP or `.sha256` file. The local
 `pipelines/build-windows.ps1` uses the same mode and leaves its runnable folder
 under `artifacts/local/windows-x64/`.
 
-`uat`, `uat-macos-intel`, `uat-macos-universal` and `uat-ipad` use Node.js 24 releases of Checkout, Setup Python
+`Tre PDF UAT`, `Tre PDF UAT - macOS Intel`, `Tre PDF UAT - macOS Universal` and `Tre PDF UAT - iPad` use Node.js 24 releases of Checkout, Setup Python
 and Upload Artifact. Desktop Qt installation also uses a Node.js 24 action;
 Windows initializes MSVC directly through Visual Studio's Developer PowerShell
 instead of a JavaScript action. This runtime belongs to GitHub's build runner,
@@ -218,7 +222,7 @@ The desktop workflows pass `--macos-dmg` to `package_uat.py` for their macOS
 jobs. macOS jobs install the pinned dependencies in
 [`requirements-macos-dmg.txt`](../scripts/ci/requirements-macos-dmg.txt):
 `dmgbuild` 1.6.7, `ds-store` 1.3.3 and `mac-alias` 2.2.3. Packaging creates a
-compressed UDZO disk image with a saved 640 × 420 Finder icon view: `trepdf.app`
+compressed UDZO disk image with a saved 640 × 420 Finder icon view: `Tre PDF.app`
 on the left, Applications on the right, and a Retina arrow between them. A
 visible **Read Me** folder below contains `START-HERE.txt`, `VERSION`,
 `build-info.json` and dependency licenses. The layout is written into the image
@@ -245,7 +249,7 @@ replace native rendering or manual UAT.
 
 ## macOS signing and notarization
 
-The macOS jobs in `uat`, `uat-macos-intel` and `uat-macos-universal` use these
+The macOS jobs in `Tre PDF UAT`, `Tre PDF UAT - macOS Intel` and `Tre PDF UAT - macOS Universal` use these
 GitHub Actions secrets during the packaging step:
 
 | Secret | Value |

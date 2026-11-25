@@ -81,8 +81,8 @@ rendering and limited editing stay at the platform boundary.
 
 ## Build using GitHub Actions
 
-Run **Actions → uat-web → Run workflow** on the branch containing these files.
-Enter an optional **version** such as `1.2.3` to produce `TrePDF-1.2.3-web-wasm`.
+Run **Actions → Tre PDF UAT - Web → Run workflow** on the branch containing these files.
+Enter an optional **version** such as `1.2.3` to produce the `Tre PDF-1.2.3-web-wasm` artifact.
 Leaving it blank uses `0.0.<run number>` from the web workflow.
 
 The artifact contains a ZIP and SHA-256 checksum. Extract the ZIP, then serve the

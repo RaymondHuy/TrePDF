@@ -87,7 +87,7 @@ $trepdfCMake = 'E:/App/CLion 2026.1.2/bin/cmake/win/x64/bin/cmake.exe'
 & $trepdfCMake --build --preset windows-clion-debug
 ```
 
-The executable is `cmake-build-windows-qt612-debug/trepdf.exe`. After linking,
+The executable is `cmake-build-windows-qt612-debug/Tre PDF.exe`. After linking,
 the Windows deployment helper copies PDFium and qpdf DLLs and runs the Qt
 kit's `windeployqt` to deploy Qt libraries, QML imports, plugins, and compiler
 runtime beside the executable. It uses the compiler runtime selected by Qt,
@@ -127,7 +127,7 @@ Windows SDK. Python 3.12+ x64, CMake and Ninja must be available on PATH.
 
 The script prepares its own MSVC PDF/OCR dependencies and deploys the application
 to `artifacts/local/windows-x64/TrePDF-<version>-windows-x64/`. Open
-`bin/trepdf.exe` inside that folder. Keep the complete folder together, including
+`bin/Tre PDF.exe` inside that folder. Keep the complete folder together, including
 Qt/PDF libraries, plugins, OCR data, licenses, `VERSION`, and `build-info.json`.
 The script checks startup before reporting success and creates no ZIP or archive
 checksum. Its build and dependencies are separated by Qt version under

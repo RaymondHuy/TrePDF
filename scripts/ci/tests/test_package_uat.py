@@ -32,7 +32,7 @@ class WindowsPackagingTests(unittest.TestCase):
         self.output = self.root / "output"
         self.dependencies = self.root / "dependencies"
         self.summary = self.root / "summary.md"
-        self.exe = self.stage / "bin/trepdf.exe"
+        self.exe = self.stage / "bin/Tre PDF.exe"
         self.exe.parent.mkdir(parents=True)
         self.exe.write_bytes(b"synthetic Windows executable")
         (self.exe.parent / "Qt6Core.dll").write_bytes(b"synthetic Qt runtime")
@@ -97,7 +97,7 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertEqual(list(self.root.rglob("*.zip")), [])
         self.assertEqual(list(self.root.rglob("*.sha256")), [])
-        self.assertIn("bin/trepdf.exe", self.summary.read_text())
+        self.assertIn("bin/Tre PDF.exe", self.summary.read_text())
 
     def test_startup_failure_still_stops_publication(self):
         with patch.object(package_uat, "smoke_test", side_effect=RuntimeError("startup failed")), \
@@ -124,7 +124,7 @@ class WindowsPackagingTests(unittest.TestCase):
         archive = self.output / "TrePDF-0.0.1-windows-x64.zip"
         with zipfile.ZipFile(archive) as result:
             self.assertEqual(result.read(f"{self.stage.name}/VERSION"), b"0.0.1\n")
-            self.assertIn(f"{self.stage.name}/bin/trepdf.exe", result.namelist())
+            self.assertIn(f"{self.stage.name}/bin/Tre PDF.exe", result.namelist())
             self.assertIn(f"{self.stage.name}/licenses/pdfium/LICENSE", result.namelist())
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         self.assertEqual(Path(str(archive) + ".sha256").read_text(),
@@ -148,14 +148,16 @@ class MacOSPackagingTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.stage = self.root / "TrePDF-1.2.3-macos-universal-qt6.11"
-        self.app = self.stage / "trepdf.app"
+        self.app = self.stage / "Tre PDF.app"
         self.output = self.root / "output"
         self.dependencies = self.root / "dependencies"
-        executable = self.app / "Contents/MacOS/trepdf"
+        executable = self.app / "Contents/MacOS/Tre PDF"
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"synthetic universal executable")
         (self.app / "Contents/Info.plist").write_bytes(
-            plistlib.dumps({"LSMinimumSystemVersion": "13.0", "CFBundleShortVersionString": "1.2.3"}))
+            plistlib.dumps({"LSMinimumSystemVersion": "13.0", "CFBundleShortVersionString": "1.2.3",
+                           "CFBundleName": "Tre PDF", "CFBundleDisplayName": "Tre PDF",
+                           "CFBundleExecutable": "Tre PDF"}))
         self.ocr = self.dependencies / "ocr"
         for directory in (self.ocr / "share/tessdata", self.app / "Contents/Resources/tessdata"):
             directory.mkdir(parents=True)
@@ -207,6 +209,23 @@ class MacOSPackagingTests(unittest.TestCase):
             self.run_package("--macos-dmg")
         self.assertFalse(self.output.exists())
 
+    def test_rejects_stale_app_names_before_signing_or_packaging(self):
+        plist = self.app / "Contents/Info.plist"
+        original = plistlib.loads(plist.read_bytes())
+        for key in ("CFBundleName", "CFBundleDisplayName", "CFBundleExecutable"):
+            with self.subTest(key=key):
+                plist.write_bytes(plistlib.dumps({**original, key: "trepdf"}))
+                with patch.object(package_uat, "sign_macos_bundle") as sign, \
+                        patch.object(package_uat.subprocess, "run") as native, \
+                        patch.object(package_uat, "create_macos_dmg") as dmg:
+                    with self.assertRaisesRegex(RuntimeError, f"{key} must be 'Tre PDF'"):
+                        self.run_package("--macos-dmg")
+                sign.assert_not_called()
+                native.assert_not_called()
+                dmg.assert_not_called()
+                self.assertFalse(self.output.exists())
+                self.assertFalse((self.stage / "build-info.json").exists())
+
     def test_universal_verifies_both_slices_and_packages_dmg_with_metadata(self):
         def fake_dmg(stage, destination, version):
             self.assertEqual((stage, version), (self.stage, "1.2.3"))
@@ -226,7 +245,8 @@ class MacOSPackagingTests(unittest.TestCase):
         verify_signature.assert_called_once()
         smoke.assert_called_once()
         self.assertEqual(smoke.call_args.args[1], "macos-universal")
-        self.assertEqual(smoke.call_args.args[0].name, "trepdf")
+        self.assertEqual(smoke.call_args.args[0].name, "Tre PDF")
+        self.assertEqual(smoke.call_args.args[0].parents[2].name, "Tre PDF.app")
         self.assertIn(self.stage.name, str(smoke.call_args.args[0]))
         dmg.assert_called_once()
         metadata = json.loads((self.stage / "build-info.json").read_text())
@@ -235,6 +255,10 @@ class MacOSPackagingTests(unittest.TestCase):
         self.assertEqual(metadata["macos_deployment_target"], "13.0")
         self.assertEqual(metadata["qt"], "6.11.0")
         self.assertIn("Intel and Apple Silicon", (self.stage / "START-HERE.txt").read_text())
+        self.assertIn('codesign --verify --deep --strict "/path/to/Tre PDF.app"',
+                      (self.stage / "START-HERE.txt").read_text())
+        with zipfile.ZipFile(self.output / "TrePDF-1.2.3-macos-universal-qt6.11.zip") as archive:
+            self.assertIn(f"{self.stage.name}/Tre PDF.app/Contents/MacOS/Tre PDF", archive.namelist())
         for suffix in ("zip", "dmg"):
             archive = self.output / f"TrePDF-1.2.3-macos-universal-qt6.11.{suffix}"
             self.assertTrue(archive.is_file())
@@ -318,7 +342,8 @@ class MacOSPackagingTests(unittest.TestCase):
             process = launch.return_value
             process.wait.side_effect = [subprocess.TimeoutExpired("trepdf", 12), 0]
             process.poll.return_value = None
-            package_uat.smoke_test(self.app / "Contents/MacOS/trepdf", "macos-universal")
+            package_uat.smoke_test(self.app / "Contents/MacOS/Tre PDF", "macos-universal")
+        self.assertEqual(launch.call_args.args[0], [str(self.app / "Contents/MacOS/Tre PDF")])
         environment = launch.call_args.kwargs["env"]
         self.assertEqual(environment["QT_QPA_PLATFORM"], "cocoa")
         self.assertNotIn("QT_PLUGIN_PATH", environment)

@@ -11,7 +11,7 @@ or QT_ROOT_DIR; otherwise falls back to qmake.exe on PATH.
 Does not install Qt, Node.js or build tools. The first run downloads and
 builds the pinned PDF/OCR dependencies; later runs reuse their manifest.
 Output: artifacts/local/windows-x64/TrePDF-<version>-windows-x64/.
-Launch bin/trepdf.exe inside that folder. No ZIP or archive checksum is created.
+Launch bin/Tre PDF.exe inside that folder. No ZIP or archive checksum is created.
 Without -Version / TREPDF_VERSION, increments the highest local 0.0.x output
 or staging folder, including incomplete builds. Existing output is never replaced.
 .EXAMPLE
@@ -214,7 +214,7 @@ try {
         '--platform', $Platform, '--version', $Version, '--stage', $Stage,
         '--dependencies', $Dependencies, '--output', $Output, '--no-archive'))
     Write-Host "Ready: $Stage"
-    Write-Host "Run: $(Join-Path $Stage 'bin/trepdf.exe')"
+    Write-Host "Run: $(Join-Path $Stage 'bin/Tre PDF.exe')"
 } finally {
     $BuildLock.Dispose()
 }
