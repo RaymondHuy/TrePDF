@@ -1,5 +1,5 @@
-name: uat-macos-universal
-run-name: uat-macos-universal ${{ inputs.version || format('0.0.{0}', github.run_number) }}
+name: Tre PDF UAT - macOS Universal
+run-name: Tre PDF UAT - macOS Universal ${{ inputs.version || format('0.0.{0}', github.run_number) }}
 
 on:
   workflow_dispatch:
@@ -151,7 +151,7 @@ jobs:
           cmake --install build/universal --config Release \
             --prefix "$PWD/build/stage/TrePDF-$TREPDF_VERSION-$TREPDF_PACKAGE"
 
-      - name: Sign, notarize and verify Universal downloads on Apple Silicon
+      - name: Verify Tre PDF app name, sign and notarize Universal downloads
         # Checks every bundled Mach-O, then signs the final bundle and smoke-tests
         # the extracted ZIP on this native arm64 runner. DMG keeps the Finder layout.
         env:
@@ -217,9 +217,9 @@ jobs:
               raise RuntimeError("This check requires a native Intel runner")
           app = Path("restored") / (
               f"TrePDF-{os.environ['TREPDF_VERSION']}-{os.environ['TREPDF_PACKAGE']}"
-          ) / "trepdf.app"
+          ) / "Tre PDF.app"
           verify_macos_bundle(app)
-          smoke_test(app.resolve() / "Contents/MacOS/trepdf", "macos-universal")
+          smoke_test(app.resolve() / "Contents/MacOS/Tre PDF", "macos-universal")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
               summary.write("Universal package: native Intel startup check passed.\n")
           PY
@@ -245,7 +245,7 @@ jobs:
       - name: Upload ZIP and checksums
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: TrePDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
+          name: Tre PDF-${{ env.TREPDF_VERSION }}-${{ env.TREPDF_PACKAGE }}
           path: |
             artifacts/*.zip
             artifacts/*.zip.sha256
