@@ -68,6 +68,50 @@ QString syncUiText(const PDFEditController &controller, int page)
 }
 }
 
+void PDFEditControllerTest::showsPlusForTextAndImagePlacement()
+{
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("edit-image-cursor.pdf"));
+    QVERIFY(createFontStylePdf(path));
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFileInfo(
+        QFINDTESTDATA("../src/Main.qml")).canonicalFilePath()));
+    std::unique_ptr<QObject> window(component.create());
+    QVERIFY2(window, qPrintable(component.errorString()));
+    auto *view = qobject_cast<QQuickWindow *>(window.get());
+    auto *model = window->findChild<PDFTabModel *>();
+    auto *tabs = window->findChild<QObject *>(QStringLiteral("ribbonTabs"));
+    auto *picker = window->findChild<QObject *>(QStringLiteral("editImageFileDialog"));
+    QVERIFY(view && model && tabs && picker);
+    view->show();
+    QTRY_VERIFY(view->isExposed());
+    auto *session = model->open(QUrl::fromLocalFile(path));
+    QVERIFY(session);
+    QVERIFY(tabs->setProperty("currentIndex", 1));
+    QQuickItem *overlay = nullptr;
+    QTRY_VERIFY((overlay = syncEditOverlay(view->contentItem())) && overlay->width() > 0);
+    QQuickItem *addText = nullptr;
+    QQuickItem *addImage = nullptr;
+    QTRY_VERIFY((addText = syncVisualItem(view->contentItem(), QStringLiteral("editAddTextButton"))));
+    QTRY_VERIFY((addImage = syncVisualItem(view->contentItem(), QStringLiteral("editAddImageButton"))));
+    const QPoint onPage = overlay->mapToScene(QPointF(overlay->width() / 2, 60)).toPoint();
+    QVERIFY(QMetaObject::invokeMethod(addText, "clicked"));
+    QTest::mouseMove(view, onPage);
+    QTRY_VERIFY(overlay->property("placementCursorActive").toBool());
+    QTRY_COMPARE(view->cursor().shape(), Qt::BlankCursor);
+
+    QVERIFY(QMetaObject::invokeMethod(addImage, "clicked"));
+    QCOMPARE(session->editController()->tool(), PDFEditController::AddImageTool);
+    QTRY_VERIFY(overlay->property("placementCursorActive").toBool());
+    QTRY_COMPARE(view->cursor().shape(), Qt::BlankCursor);
+    QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, onPage);
+    QTRY_VERIFY(picker->property("visible").toBool());
+    QVERIFY(QMetaObject::invokeMethod(picker, "reject"));
+    QTRY_COMPARE(session->editController()->tool(), PDFEditController::SelectTool);
+    QTRY_VERIFY(!overlay->property("placementCursorActive").toBool());
+    QVERIFY(!session->editController()->hasDrafts());
+}
+
 void PDFEditControllerTest::copiesAndPastesImagesThroughMainWindow()
 {
     QTest::failOnWarning(QRegularExpression(QStringLiteral(".*Binding loop.*")));
@@ -171,6 +215,29 @@ void PDFEditControllerTest::copiesAndPastesImagesThroughMainWindow()
     }
 
     QVERIFY(tabs->setProperty("currentIndex", 1));
+    controller.setShapeType(PDFEditController::EllipseShape);
+    const auto oval = controller.addShape(0, QPointF(0.2, 0.4), QPointF(0.5, 0.6));
+    QVERIFY(!oval.isEmpty());
+    QQuickItem *shapeOverlay = nullptr;
+    QTRY_VERIFY((shapeOverlay = syncEditOverlay(quickWindow->contentItem())));
+    QVERIFY(QMetaObject::invokeMethod(shapeOverlay, "showSelectionActions",
+        Q_ARG(QVariant, shapeOverlay->width() * 0.35),
+        Q_ARG(QVariant, shapeOverlay->height() * 0.5), Q_ARG(QVariant, oval)));
+    QQuickItem *shapeCopy = nullptr;
+    QTRY_VERIFY((shapeCopy = syncVisualItem(quickWindow->contentItem(), QStringLiteral("copyImageAction"))));
+    QTRY_VERIFY(shapeCopy->isVisible() && shapeCopy->isEnabled());
+    QVERIFY(QMetaObject::invokeMethod(shapeCopy, "clicked"));
+    QTRY_VERIFY(controller.clipboardHasShape());
+    shapeOverlay->forceActiveFocus();
+    QTRY_VERIFY(pasteShortcut->property("enabled").toBool());
+    QVERIFY(QMetaObject::invokeMethod(pasteShortcut, "activated"));
+    QTRY_COMPARE(controller.draftsForPage(0).size(), 2);
+    QCOMPARE(controller.selectedKind(), QStringLiteral("addedShape"));
+    QVERIFY(controller.selectedObjectId() != oval.value("objectId").toString());
+    controller.undo();
+    controller.undo();
+    QVERIFY(!controller.hasDrafts());
+
     const auto candidate = candidateForKind(waitForCandidates(controller, 0), QStringLiteral("image"));
     QVERIFY(controller.selectCandidate(0, candidate.value(QStringLiteral("objectId")).toString()));
     // A clipboard may advertise both text and pixels. A focused text field

@@ -276,12 +276,12 @@ Item {
     readonly property bool selectCursorActive: selectCursorReady
         && selectCursorVisible
         && !editing
-    readonly property bool addTextCursorReady: addTextCursorImage.status === Image.Ready
-    readonly property bool addTextCursorActive: addTextCursorReady
+    readonly property bool placementToolActive: controller.tool === PDFEditController.AddTextTool
+        || controller.tool === PDFEditController.AddImageTool
+    readonly property bool placementCursorActive: placementToolActive
+        && placementCursorImage.status === Image.Ready
         && interactionActive
         && !editing
-        && (controller.tool === PDFEditController.AddTextTool
-            || controller.tool === PDFEditController.AddImageTool)
         && hitArea.containsMouse
 
     signal selectedDraftContentBoundsSyncRequested()
@@ -2436,6 +2436,7 @@ Item {
         enabled: root.interactionActive && !root.pooled
             && root.tableCellState !== null && root.tableCellState.active
             && root.tableCellState.page !== root.page
+        visible: enabled
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onPressed: root.tableCellState.commit()
     }
@@ -3601,9 +3602,9 @@ Item {
             || root.isStampTool()
             || root.controller.tool === PDFEditController.AddShapeTool
             || root.controller.tool === PDFEditController.FreeTextTool
-        cursorShape: root.selectCursorActive || root.addTextCursorActive
+        cursorShape: root.selectCursorActive || root.placementCursorActive
             ? Qt.BlankCursor
-            : root.isTextMarkupTool()
+            : root.placementToolActive || root.isTextMarkupTool()
                     || root.isDrawingCommentTool()
                     || root.isInkTool()
                     || root.isStampTool()
@@ -3612,9 +3613,6 @@ Item {
                 ? Qt.CrossCursor
             : root.controller.tool === PDFEditController.StickyNoteTool
                 ? Qt.PointingHandCursor
-            : root.controller.tool === PDFEditController.AddTextTool
-                    || root.controller.tool === PDFEditController.AddImageTool
-            ? Qt.IBeamCursor
             : root.hasCandidate(root.hoverCandidate)
             ? !root.hoverCandidate.editable
                     && !root.hoverCandidate.deletable
@@ -4052,8 +4050,8 @@ Item {
                     icon.color: "transparent"
                     font.pixelSize: 10
                     visible: root.imageClipboardEnabled
-                        && root.isImageKind(root.controller.selectedKind)
-                    enabled: root.controller.selectedImageCopyable
+                        && (root.isImageKind(root.controller.selectedKind) || root.controller.selectedShapeCopyable)
+                    enabled: root.controller.selectedImageCopyable || root.controller.selectedShapeCopyable
 
                     background: Rectangle {
                         radius: 4
@@ -4067,7 +4065,7 @@ Item {
                     onClicked: {
                         selectionActions.close()
                         root.forceActiveFocus()
-                        root.controller.copySelectedImage()
+                        root.controller.copySelectedObject()
                     }
                 }
 
@@ -4125,7 +4123,7 @@ Item {
     }
 
     Image {
-        id: addTextCursorImage
+        id: placementCursorImage
 
         x: hitArea.mouseX - width / 2
         y: hitArea.mouseY - height / 2
@@ -4136,7 +4134,7 @@ Item {
         sourceSize.height: 22
         fillMode: Image.PreserveAspectFit
         smooth: true
-        visible: root.addTextCursorActive
+        visible: root.placementCursorActive
         z: 4
         Accessible.ignored: true
     }

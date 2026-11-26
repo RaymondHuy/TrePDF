@@ -105,7 +105,7 @@ AppWindow {
         || ocrOutputDialog.writePending
     readonly property bool fileOpenBlocked:
         tabModel.anySaving || headerSaveRequest !== null || openingFiles || modalOperationActive
-    readonly property bool imageClipboardShortcutsEnabled:
+    readonly property bool objectClipboardShortcutsEnabled:
         activeDocument.loaded && !fileOpenBlocked
         && (appRibbon.editTabActive || appRibbon.marginTabActive)
         && activeWorkspaceItem !== null && activeWorkspaceItem.activePaneIndex === 0
@@ -1613,21 +1613,23 @@ AppWindow {
         objectName: "copyImageShortcut"
         sequences: [StandardKey.Copy]
         autoRepeat: false
-        enabled: window.imageClipboardShortcutsEnabled
-            && window.activeEditController.selectedImageCopyable
-        onActivated: window.activeEditController.copySelectedImage()
+        enabled: window.objectClipboardShortcutsEnabled
+            && (window.activeEditController.selectedImageCopyable
+                || (appRibbon.editTabActive && window.activeEditController.selectedShapeCopyable))
+        onActivated: window.activeEditController.copySelectedObject()
     }
 
     Shortcut {
         objectName: "pasteImageShortcut"
         sequences: [StandardKey.Paste]
         autoRepeat: false
-        enabled: window.imageClipboardShortcutsEnabled
-            && window.activeEditController.clipboardHasImage
+        enabled: window.objectClipboardShortcutsEnabled
+            && (window.activeEditController.clipboardHasImage
+                || (appRibbon.editTabActive && window.activeEditController.clipboardHasShape))
         onActivated: {
             const workspace = window.activeWorkspaceItem
             if (workspace && workspace.prepareForDeactivation())
-                window.activeEditController.pasteImageFromClipboard(workspace.activePage)
+                window.activeEditController.pasteClipboardObject(workspace.activePage)
         }
     }
 
@@ -2085,6 +2087,7 @@ AppWindow {
 
     PlatformFileDialog {
         id: imageDialog
+        objectName: "editImageFileDialog"
 
         //% "Select Image"
         title: qsTrId("SelectImage")
@@ -2092,7 +2095,12 @@ AppWindow {
         //% "Image files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.tif *.tiff)"
         nameFilters: [qsTrId("ImageFileFilter")]
         onAccepted: window.insertSelectedImage(selectedFile)
-        onRejected: window.clearImageInsertRequest()
+        onRejected: {
+            const controller = window.imageInsertController
+            window.clearImageInsertRequest()
+            if (controller && controller.tool === PDFEditController.AddImageTool)
+                controller.tool = PDFEditController.SelectTool
+        }
     }
 
     PlatformFileDialog {

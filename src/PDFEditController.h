@@ -121,8 +121,10 @@ class PDFEditController : public QObject
     Q_PROPERTY(bool selectedEditable READ selectedEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedImageResizable READ selectedImageResizable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedImageRotatable READ selectedImageRotatable NOTIFY selectionChanged FINAL)
-    Q_PROPERTY(bool selectedImageCopyable READ selectedImageCopyable NOTIFY selectedImageCopyableChanged FINAL)
-    Q_PROPERTY(bool clipboardHasImage READ clipboardHasImage NOTIFY clipboardImageChanged FINAL)
+    Q_PROPERTY(bool selectedShapeCopyable READ selectedShapeCopyable NOTIFY selectedObjectCopyableChanged FINAL)
+    Q_PROPERTY(bool clipboardHasShape READ clipboardHasShape NOTIFY clipboardContentChanged FINAL)
+    Q_PROPERTY(bool selectedImageCopyable READ selectedImageCopyable NOTIFY selectedObjectCopyableChanged FINAL)
+    Q_PROPERTY(bool clipboardHasImage READ clipboardHasImage NOTIFY clipboardContentChanged FINAL)
     Q_PROPERTY(bool selectedDeletable READ selectedDeletable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedDrawingPropertiesEditable READ selectedDrawingPropertiesEditable NOTIFY selectionChanged FINAL)
     Q_PROPERTY(bool selectedTableFrameOnly READ selectedTableFrameOnly NOTIFY selectionChanged FINAL)
@@ -351,6 +353,10 @@ public:
     bool selectedImageResizable() const;
     bool selectedImageRotatable() const;
     bool selectedImageCopyable() const;
+    bool selectedShapeCopyable() const;
+    bool clipboardHasShape() const;
+    Q_INVOKABLE bool copySelectedObject();
+    Q_INVOKABLE QVariantMap pasteClipboardObject(int page);
     bool clipboardHasImage() const;
     Q_INVOKABLE bool copySelectedImage();
     Q_INVOKABLE QVariantMap pasteImageFromClipboard(int page);
@@ -607,8 +613,8 @@ signals:
     void shapeTypeChanged();
     void tableDimensionsChanged();
     void imageAspectRatioLockedChanged();
-    void clipboardImageChanged();
-    void selectedImageCopyableChanged();
+    void clipboardContentChanged();
+    void selectedObjectCopyableChanged();
     void highlightColorChanged();
     void underlineColorChanged();
     void squigglyColorChanged();
@@ -1171,6 +1177,8 @@ private:
                                bool notifyComments = true);
     void requestDraftRender(int page, bool immediate);
     bool removeCommentCandidate(const Candidate &candidate);
+    bool selectionAllowsClipboardCopy() const;
+    QVariantMap insertAddedShape(Candidate candidate, const QRectF &frame);
     static void setInitialGeometry(Candidate &candidate, const QRectF &sourceRect);
     void expandInitialTextFrame(Candidate &candidate, const QSizeF &pageSize) const;
     void preserveSourceTextPositions(Candidate &candidate, const QSizeF &pageSize) const;

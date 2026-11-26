@@ -554,8 +554,11 @@ private slots:
     void pastesClipboardImagesWithinHeaderAndRejectsInvalidInput();
     void cancelsSourceImageCopyWithoutPastingStaleClipboard();
     void copiesAndPastesImagesThroughMainWindow();
+    void showsPlusForTextAndImagePlacement();
     void movesAddedImageWithUndoRedo();
     void addsShapeWithUndoRedo();
+    void copiesEditableShapes_data();
+    void copiesEditableShapes();
     void savesShapesRoundTrip();
     void addsTableWithAtomicHistory();
     void insertsTableTracksWithAtomicHistory_data();

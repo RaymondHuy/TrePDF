@@ -2019,9 +2019,10 @@ Text được lưu
 
 ## 20. Luồng Add Image
 
-Nút `Hình ảnh` đặt controller vào `AddImageTool`. `EditOverlay` dùng cùng con
-trỏ dấu cộng của Add Text; click trên page gọi `requestAddImage(page, x, y)` và
-`Main.qml` mở một `FileDialog` chọn ảnh local.
+Trong tab Edit, nút `Hình ảnh` đặt controller vào `AddImageTool`. Khi chọn vị trí
+trên trang, cả Add Text và Image đều hiện dấu cộng xanh. Bấm lên trang khi dùng
+Image gọi `requestAddImage(page, x, y)` để mở hộp thoại
+chọn ảnh tại vị trí đó. Hủy hộp thoại sẽ quay về công cụ Select.
 
 Controller đọc ảnh bằng `QImageReader` với auto-transform, giới hạn file ở
 64 MiB và ảnh decode ở 40 megapixel, rồi snapshot `QImage::Format_ARGB32` vào

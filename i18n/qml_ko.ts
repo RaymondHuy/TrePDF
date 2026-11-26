@@ -4222,6 +4222,11 @@ Style: %2
         <source>Comments and replies can contain at most %1 characters.</source>
         <translation>주석과 답글은 최대 %1자까지 입력할 수 있습니다.</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>도형을 복사했습니다. Ctrl/Cmd+V로 붙여넣을 수 있습니다.</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="66"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>

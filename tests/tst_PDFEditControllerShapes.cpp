@@ -3,6 +3,8 @@
 #include "PDFTableCellMetadata.h"
 #include "PDFTableFrameRecognition.h"
 
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -291,6 +293,69 @@ void PDFEditControllerTest::editsShapePropertiesWithUndoRedo_data()
     QTest::newRow("arrow") << int(PDFEditController::ArrowShape) << false;
     QTest::newRow("triangle") << int(PDFEditController::TriangleShape) << true;
     QTest::newRow("diamond") << int(PDFEditController::DiamondShape) << true;
+}
+
+void PDFEditControllerTest::copiesEditableShapes_data()
+{
+    editsShapePropertiesWithUndoRedo_data();
+}
+
+void PDFEditControllerTest::copiesEditableShapes()
+{
+    QFETCH(int, shapeType);
+    QFETCH(bool, supportsFill);
+    const auto path = m_temporaryDirectory.filePath(QStringLiteral("copy-shapes.pdf"));
+    const auto saved = m_temporaryDirectory.filePath(QStringLiteral("pasted-shapes.pdf"));
+    QVERIFY(createDifferentPageSizesPdf(path));
+    PDFDocument document;
+    PDFEditController controller;
+    QVERIFY(document.open(QUrl::fromLocalFile(path)));
+    controller.setDocument(&document);
+    controller.setShapeType(static_cast<PDFEditController::ShapeType>(shapeType));
+    const auto original = controller.addShape(0, QPointF(0.65, 0.23), QPointF(0.32, 0.45));
+    QVERIFY(!original.isEmpty());
+    QVERIFY(controller.setSelectedDrawingStrokeColor(Qt::blue));
+    if (supportsFill)
+        QVERIFY(controller.setSelectedDrawingInteriorColor(Qt::yellow));
+    QVERIFY(controller.setSelectedDrawingOpacity(0.5));
+    QSignalSpy history(&controller, &PDFEditController::historyStateChanged);
+    QVERIFY(controller.selectedShapeCopyable());
+    QVERIFY(controller.copySelectedObject());
+    QVERIFY(controller.clipboardHasShape());
+    QCOMPARE(history.count(), 0);
+
+    // The clipboard represents the instant of Copy, including edits made before Save.
+    QVERIFY(controller.setSelectedDrawingStrokeColor(Qt::red));
+    const auto pasted = controller.pasteClipboardObject(1);
+    QCOMPARE(pasted.value("kind").toString(), QStringLiteral("addedShape"));
+    QVERIFY(pasted.value("objectId") != original.value("objectId"));
+    QCOMPARE(pasted.value("shapeType").toInt(), shapeType);
+    QCOMPARE(pasted.value("shapeStart"), original.value("shapeStart"));
+    QCOMPARE(pasted.value("shapeEnd"), original.value("shapeEnd"));
+    QCOMPARE(controller.selectedDrawingStrokeColor(), QColor(Qt::blue));
+    QCOMPARE(controller.selectedDrawingOpacity(), 0.5);
+    if (supportsFill)
+        QCOMPARE(controller.selectedDrawingInteriorColor(), QColor(Qt::yellow));
+    const QRectF copied = original.value("frameRect").toRectF();
+    const QRectF frame = pasted.value("frameRect").toRectF();
+    QVERIFY(qAbs(copied.width() * document.pageSize(0).width() - frame.width() * document.pageSize(1).width()) < 0.001);
+    QVERIFY(qAbs(copied.height() * document.pageSize(0).height() - frame.height() * document.pageSize(1).height()) < 0.001);
+    controller.undo();
+    QVERIFY(controller.draftsForPage(1).isEmpty());
+    QCOMPARE(controller.draftsForPage(0).size(), 1);
+    controller.redo();
+    QCOMPARE(controller.draftsForPage(1).size(), 1);
+    QVERIFY(controller.saveAs(QUrl::fromLocalFile(saved)));
+    const auto restored = candidateForKind(waitForCandidates(controller, 1), QStringLiteral("sourceShape"));
+    QVERIFY(controller.selectCandidate(1, restored.value("objectId").toString()));
+    QVERIFY(controller.copySelectedObject());
+    QVERIFY(!controller.pasteClipboardObject(0).isEmpty());
+    QCOMPARE(controller.selectedDrawingStrokeColor(), QColor(Qt::blue));
+    controller.setHeaderSelectionOnly(true);
+    QVERIFY(!controller.selectedShapeCopyable());
+    QVERIFY(controller.pasteClipboardObject(0).isEmpty());
+    QGuiApplication::clipboard()->setText(QStringLiteral("replacement"));
+    QVERIFY(!controller.clipboardHasShape());
 }
 
 void PDFEditControllerTest::editsShapePropertiesWithUndoRedo()
