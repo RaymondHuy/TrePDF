@@ -36,6 +36,7 @@ private slots:
     void virtualizesAndReleasesPageThumbnails();
     void filtersAndQueuesLocalPdfOpenRequests();
     void opensNativePdfRequestsThroughMainWindow();
+    void createsBlankPdfFromEmptyWindow();
     void opensDroppedPdfsWithoutLosingExistingDrafts();
     void focusesDocumentSearchWithStandardShortcut();
     void opensPdfDialogWithStandardShortcut();

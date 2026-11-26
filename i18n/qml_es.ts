@@ -497,6 +497,12 @@ Ninguna fuente de sustitución disponible admite todos los caracteres y estilos 
         <source>Contact email</source>
         <translation>Correo de contacto</translation>
     </message>
+    <message id="NewPdf">
+        <location filename="../src/Main.qml" line="1744"/>
+        <location filename="../src/Components/DocumentEmptyState.qml" line="45"/>
+        <source>New PDF</source>
+        <translation>Nuevo PDF</translation>
+    </message>
     <message id="OpenPdf">
         <location filename="../src/Components/DocumentTabs.qml" line="60"/>
         <location filename="../src/Components/DocumentTabs.qml" line="63"/>

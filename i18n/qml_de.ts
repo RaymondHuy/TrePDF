@@ -467,6 +467,12 @@ Keine verfügbare Ersatzschrift unterstützt alle Zeichen und Schriftschnitte di
         <source>Contact email</source>
         <translation>Kontakt-E-Mail</translation>
     </message>
+    <message id="NewPdf">
+        <location filename="../src/Main.qml" line="1744"/>
+        <location filename="../src/Components/DocumentEmptyState.qml" line="45"/>
+        <source>New PDF</source>
+        <translation>Neues PDF</translation>
+    </message>
     <message id="OpenPdf">
         <location filename="../src/Components/DocumentTabs.qml" line="60"/>
         <location filename="../src/Components/DocumentTabs.qml" line="63"/>

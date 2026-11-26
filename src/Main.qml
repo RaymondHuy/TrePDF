@@ -96,7 +96,7 @@ AppWindow {
         || signatureDialogLoader.active || setPasswordDialogLoader.active
         || watermarkDialogLoader.active || mergePdfDialogLoader.active || splitPdfDialogLoader.active
         || fontSettingsDialogLoader.active
-        || headerEntryNoticeLoader.active || openDialog.visible
+        || headerEntryNoticeLoader.active || openDialog.visible || newPdfDialog.visible
         || imageDialog.visible || headerImageDialog.visible || saveAsDialog.visible || excelExportDialog.visible
         || ocrOutputDialog.visible
         || (ocrPanelLoader.panel && ocrPanelLoader.panel.languageDialogOpen)
@@ -1737,6 +1737,22 @@ AppWindow {
         onAccepted: window.openFiles(selectedFiles)
     }
 
+    PlatformFileDialog {
+        id: newPdfDialog
+        objectName: "newPdfDialog"
+        //% "New PDF"
+        title: qsTrId("NewPdf")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "pdf"
+        //% "PDF files (*.pdf)"
+        nameFilters: [qsTrId("PdfFileFilter")]
+        onAccepted: {
+            const session = tabModel.createBlankPdf(selectedFile)
+            if (session && Qt.platform.os === "ios")
+                PlatformService.exportNativeFile(selectedFile)
+        }
+    }
+
     Loader {
         id: passwordPromptLoader
         active: window.passwordRequests.length > 0
@@ -2644,6 +2660,14 @@ AppWindow {
     DocumentView {
         anchors.fill: parent
         visible: window.activeSession === null
+        showCreateButton: true
+        onCreateRequested: {
+            if (window.fileOpenBlocked)
+                return
+            if (Qt.platform.os === "ios")
+                newPdfDialog.selectedFile = newPdfDialog.title + ".pdf"
+            newPdfDialog.open()
+        }
         theme: appTheme
         document: emptyDocument
         editController: emptyEditController
