@@ -4225,6 +4225,11 @@ Estilo: %2
         <source>Comments and replies can contain at most %1 characters.</source>
         <translation>Comentários e respostas podem conter no máximo %1 caracteres.</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>Forma copiada. Você pode colá-la com Ctrl/Cmd+V.</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="66"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>

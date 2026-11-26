@@ -1950,6 +1950,11 @@ PDF ของคุณยังไม่ได้บันทึก การแ
         <source>The selected image could not be opened.</source>
         <translation>ไม่สามารถเปิดรูปภาพที่เลือกได้</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>คัดลอกรูปร่างแล้ว กด Ctrl/Cmd+V เพื่อวาง</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="66"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>

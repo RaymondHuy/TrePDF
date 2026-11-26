@@ -1,12 +1,14 @@
 #include "PDFEditController.h"
 #include "PDFEditController_p.h"
 #include "PDFHeaderMetadata.h"
+#include "PDFShapeUtils.h"
 #include "PDFSourceImageGeometry.h"
 #include "PDFiumDocument.h"
 #include "PDFiumSynchronization.h"
 
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QDataStream>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -24,6 +26,7 @@
 #include <utility>
 
 namespace {
+constexpr char shapeMime[] = "application/x-trepdf-vector-shape-v1";
 constexpr char imageGeometryMime[] = "application/x-trepdf-image-geometry";
 constexpr qint64 maximumInputPixels = 40000000;
 constexpr qint64 maximumCopyPixels = 16000000;
@@ -47,7 +50,7 @@ void notifyClipboardControllers()
     const auto controllers = clipboardControllers;
     for (const auto &controller : controllers) {
         if (controller)
-            emit controller->clipboardImageChanged();
+            emit controller->clipboardContentChanged();
     }
 }
 
@@ -288,12 +291,12 @@ void PDFEditController::initializeImageClipboard()
 {
     clipboardControllers.removeIf([](const auto &controller) { return !controller; });
     clipboardControllers.append(this);
-    connect(this, &PDFEditController::selectionChanged, this, &PDFEditController::selectedImageCopyableChanged);
-    connect(this, &PDFEditController::savingChanged, this, &PDFEditController::selectedImageCopyableChanged);
-    connect(this, &PDFEditController::textEditActiveChanged, this, &PDFEditController::selectedImageCopyableChanged);
-    connect(this, &PDFEditController::toolChanged, this, &PDFEditController::selectedImageCopyableChanged);
-    connect(this, &PDFEditController::headerSelectionOnlyChanged, this, &PDFEditController::selectedImageCopyableChanged);
-    connect(this, &PDFEditController::selectedGeometryChanged, this, &PDFEditController::selectedImageCopyableChanged);
+    connect(this, &PDFEditController::selectionChanged, this, &PDFEditController::selectedObjectCopyableChanged);
+    connect(this, &PDFEditController::savingChanged, this, &PDFEditController::selectedObjectCopyableChanged);
+    connect(this, &PDFEditController::textEditActiveChanged, this, &PDFEditController::selectedObjectCopyableChanged);
+    connect(this, &PDFEditController::toolChanged, this, &PDFEditController::selectedObjectCopyableChanged);
+    connect(this, &PDFEditController::headerSelectionOnlyChanged, this, &PDFEditController::selectedObjectCopyableChanged);
+    connect(this, &PDFEditController::selectedGeometryChanged, this, &PDFEditController::selectedObjectCopyableChanged);
     connect(this, &PDFEditController::selectionChanged, this, &PDFEditController::cancelImageCopy);
     connect(this, &PDFEditController::selectedGeometryChanged, this, &PDFEditController::cancelImageCopy);
     connect(this, &PDFEditController::historyStateChanged, this, &PDFEditController::cancelImageCopy);
@@ -305,7 +308,7 @@ void PDFEditController::initializeImageClipboard()
     if (QClipboard *clipboard = QGuiApplication::clipboard()) {
         connect(clipboard, &QClipboard::dataChanged, this, [this] {
             cancelImageCopy();
-            emit clipboardImageChanged();
+            emit clipboardContentChanged();
         });
     }
 }
@@ -329,11 +332,30 @@ bool PDFEditController::clipboardHasImage() const
     return mime && mime->hasImage();
 }
 
+bool PDFEditController::selectionAllowsClipboardCopy() const
+{
+    return m_document && m_document->isLoaded() && m_document->allowsTextCopy()
+        && !m_saving && !m_textEditActive && !m_frameResizeActive && m_hasSelection
+        && m_tool == SelectTool && candidateMatchesSelectionScope(m_selectedCandidate);
+}
+
+bool PDFEditController::selectedShapeCopyable() const
+{
+    return !m_headerSelectionOnly && selectionAllowsClipboardCopy()
+        && PDFEditControllerPrivate::isShapeCandidateKind(m_selectedCandidate.kind)
+        && m_selectedCandidate.shapeType != TableShape;
+}
+
+bool PDFEditController::clipboardHasShape() const
+{
+    const QClipboard *clipboard = QGuiApplication::clipboard();
+    const QMimeData *mime = clipboard ? clipboard->mimeData() : nullptr;
+    return !imageCopyPending() && mime && mime->hasFormat(shapeMime);
+}
+
 bool PDFEditController::selectedImageCopyable() const
 {
-    if (!m_document || !m_document->isLoaded() || !m_document->allowsTextCopy()
-        || m_saving || m_textEditActive || m_frameResizeActive || !m_hasSelection
-        || m_tool != SelectTool || !candidateMatchesSelectionScope(m_selectedCandidate))
+    if (!selectionAllowsClipboardCopy())
         return false;
     const Draft draft = selectedDraftForDisplay();
     if (draft.deleted || !finiteFrame(draft.frameRect))
@@ -494,4 +516,93 @@ QVariantMap PDFEditController::pasteImageFromClipboard(int page)
     topLeft.setY(qBound(minimumTop, topLeft.y(), minimumTop + availableHeight - height));
     return addImageData(page, (topLeft.x() + width / 2.0) / pageSize.width(),
         (topLeft.y() + height / 2.0) / pageSize.height(), std::move(image), width, height);
+}
+
+bool PDFEditController::copySelectedObject()
+{
+    if (!selectedShapeCopyable())
+        return copySelectedImage();
+    QClipboard *clipboard = QGuiApplication::clipboard();
+    if (!clipboard || imageCopyPending())
+        return false;
+
+    const Draft draft = selectedDraftForDisplay();
+    const QSizeF pageSize = m_document->pageSize(draft.candidate.page);
+    if (draft.deleted || !finiteFrame(draft.frameRect) || !finiteSize(pageSize))
+        return false;
+
+    // A fixed-size vector payload has no source object IDs or PDF handles.
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setVersion(QDataStream::Qt_6_0);
+    stream << quint8(draft.candidate.shapeType) << pageSize << draft.frameRect
+           << draft.candidate.shapeStartRatio << draft.candidate.shapeEndRatio
+           << double(draft.candidate.shapeStrokeWidthRatio)
+           << draft.commentProperties.strokeColor << draft.commentProperties.interiorColor
+           << double(draft.commentProperties.opacity);
+    auto *mime = new QMimeData;
+    mime->setData(shapeMime, bytes);
+    clipboard->setMimeData(mime);
+    //% "Shape copied. You can paste it with Ctrl/Cmd+V."
+    emit statusMessage(qtTrId("ShapeCopied"));
+    return true;
+}
+
+QVariantMap PDFEditController::pasteClipboardObject(int page)
+{
+    if (!clipboardHasShape())
+        return pasteImageFromClipboard(page);
+    if (m_headerSelectionOnly || m_saving || m_textEditActive || m_frameResizeActive
+        || m_tool != SelectTool || !m_document || !m_document->isLoaded()
+        || page < 0 || page >= m_document->pageCount())
+        return {};
+    if (!documentAllowsEditing()) {
+        emit statusMessage(qtTrId("PdfEditingNotPermitted"));
+        return {};
+    }
+
+    const QByteArray bytes = QGuiApplication::clipboard()->mimeData()->data(shapeMime);
+    if (bytes.isEmpty() || bytes.size() > 256)
+        return {};
+    QDataStream stream(bytes);
+    stream.setVersion(QDataStream::Qt_6_0);
+    quint8 type = 0;
+    QSizeF source;
+    PDFShapeUtils::Metadata shape;
+    stream >> type >> source >> shape.frame >> shape.start >> shape.end
+           >> shape.strokeWidthRatio >> shape.stroke >> shape.fill >> shape.opacity;
+    if (stream.status() != QDataStream::Ok || !stream.atEnd() || type >= TableShape
+        || !finiteSize(source) || source.width() > 1000000 || source.height() > 1000000)
+        return {};
+    shape.type = static_cast<ShapeType>(type);
+    if (!PDFShapeUtils::validMetadata(shape))
+        return {};
+
+    const QSizeF target = m_document->pageSize(page);
+    if (!finiteSize(target))
+        return {};
+    const qreal width = shape.frame.width() * source.width();
+    const qreal height = shape.frame.height() * source.height();
+    const qreal fit = std::min({1.0, target.width() / width, target.height() / height});
+    const QSizeF size(qMin(1.0, width * fit / target.width()),
+                      qMin(1.0, height * fit / target.height()));
+    const QPointF origin(qBound(0.0, shape.frame.x() + 12.0 / target.width(), 1.0 - size.width()),
+                         qBound(0.0, shape.frame.y() + 12.0 / target.height(), 1.0 - size.height()));
+    shape.frame = QRectF(origin, size);
+    shape.strokeWidthRatio = shape.strokeWidthRatio * source.height() * fit / target.height();
+    if (!PDFShapeUtils::validMetadata(shape))
+        return {};
+
+    Candidate candidate;
+    candidate.page = page;
+    candidate.shapeType = shape.type;
+    candidate.shapeStartRatio = shape.start;
+    candidate.shapeEndRatio = shape.end;
+    candidate.shapeStrokeWidthRatio = shape.strokeWidthRatio;
+    candidate.strokeColor = shape.stroke;
+    candidate.fillColor = shape.fill.isValid() ? shape.fill : QColor(Qt::transparent);
+    candidate.commentProperties.strokeColor = shape.stroke;
+    candidate.commentProperties.interiorColor = shape.fill;
+    candidate.commentProperties.opacity = shape.opacity;
+    return insertAddedShape(std::move(candidate), shape.frame);
 }

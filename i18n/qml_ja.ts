@@ -4222,6 +4222,11 @@ Style: %2
         <source>Comments and replies can contain at most %1 characters.</source>
         <translation>コメントと返信は最大%1文字です。</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>図形をコピーしました。Ctrl/Cmd+V で貼り付けられます。</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="66"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>

@@ -2088,6 +2088,11 @@ Your PDF was not saved. Your edits have been kept.</translation>
         <source>The selected image could not be opened.</source>
         <translation>The selected image could not be opened.</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>Shape copied. You can paste it with Ctrl/Cmd+V.</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="65"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>

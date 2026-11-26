@@ -507,13 +507,6 @@ QVariantMap PDFEditController::addShape(int page,
     finishSelectedTextEdit();
     Candidate candidate;
     candidate.page = page;
-    candidate.addedOrder = ++m_nextAddedObjectId;
-    candidate.objectId = QStringLiteral("added-shape:")
-        + QString::number(candidate.addedOrder);
-    candidate.kind = QStringLiteral("addedShape");
-    candidate.label = shapeLabel(m_shapeType);
-    candidate.editable = true;
-    candidate.added = true;
     candidate.shapeType = m_shapeType;
     if (m_shapeType == TableShape) {
         candidate.tableRows = m_tableRows;
@@ -524,6 +517,19 @@ QVariantMap PDFEditController::addShape(int page,
     candidate.shapeStrokeWidthRatio = kAddedShapeStrokeWidthRatio;
     candidate.strokeColor = QColor(Qt::black);
     candidate.fillColor = QColor(Qt::transparent);
+    return insertAddedShape(std::move(candidate), frameRect);
+}
+
+QVariantMap PDFEditController::insertAddedShape(Candidate candidate, const QRectF &frameRect)
+{
+    const int page = candidate.page;
+    candidate.addedOrder = ++m_nextAddedObjectId;
+    candidate.objectId = QStringLiteral("added-shape:")
+        + QString::number(candidate.addedOrder);
+    candidate.kind = QStringLiteral("addedShape");
+    candidate.label = shapeLabel(candidate.shapeType);
+    candidate.editable = true;
+    candidate.added = true;
     setInitialGeometry(candidate, frameRect);
 
     m_addedCandidates.append(std::move(candidate));

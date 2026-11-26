@@ -1952,6 +1952,11 @@ Vaš PDF nije spremljen. Vaše su izmjene sačuvane.</translation>
         <source>The selected image could not be opened.</source>
         <translation>Odabranu sliku nije moguće otvoriti.</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>Oblik je kopiran. Možete ga zalijepiti tipkama Ctrl/Cmd+V.</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="66"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>

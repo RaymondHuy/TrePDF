@@ -2087,6 +2087,11 @@ PDF chưa được lưu. Các chỉnh sửa của bạn vẫn được giữ l�
         <source>The selected image could not be opened.</source>
         <translation>Không thể mở hình ảnh đã chọn.</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>Đã sao chép hình. Nhấn Ctrl/Cmd+V để dán.</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="65"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>

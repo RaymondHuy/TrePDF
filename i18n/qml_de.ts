@@ -4195,6 +4195,11 @@ Schriftschnitt: %2
         <source>Comments and replies can contain at most %1 characters.</source>
         <translation>Kommentare und Antworten dürfen höchstens %1 Zeichen enthalten.</translation>
     </message>
+    <message id="ShapeCopied">
+        <location filename="../src/PDFEditControllerClipboard.cpp" line="547"/>
+        <source>Shape copied. You can paste it with Ctrl/Cmd+V.</source>
+        <translation>Form kopiert. Mit Strg/Cmd+V können Sie sie einfügen.</translation>
+    </message>
     <message id="ImageCopied">
         <location filename="../src/PDFEditControllerClipboard.cpp" line="66"/>
         <source>Image copied. You can paste it with Ctrl/Cmd+V.</source>
