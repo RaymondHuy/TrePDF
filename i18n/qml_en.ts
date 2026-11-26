@@ -32,6 +32,12 @@
         <source>Save your changes to select and copy text.</source>
         <translation>Save your changes to select and copy text.</translation>
     </message>
+    <message id="NewPdf">
+        <location filename="../src/Main.qml" line="1744"/>
+        <location filename="../src/Components/DocumentEmptyState.qml" line="45"/>
+        <source>New PDF</source>
+        <translation>New PDF</translation>
+    </message>
     <message id="OpenPdf">
         <location filename="../src/Components/DocumentView.qml" line="808"/>
         <location filename="../src/Components/DocumentTabBar.qml" line="65"/>

@@ -77,6 +77,56 @@ void PDFEditControllerTest::filtersAndQueuesLocalPdfOpenRequests()
     QCOMPARE(handler.takePendingFiles(), (QList<QUrl>{first}));
 }
 
+void PDFEditControllerTest::createsBlankPdfFromEmptyWindow()
+{
+    QVERIFY(registerQmlTestTypes(QFINDTESTDATA("../src/Components/AppTheme.qml")));
+    QQmlEngine engine;
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root, qPrintable(component.errorString()));
+    QVERIFY(root->setProperty("allowWindowClose", true));
+    auto *tabs = root->findChild<PDFTabModel *>();
+    auto *button = root->findChild<QQuickItem *>(QStringLiteral("createPdfButton"));
+    auto *picker = root->findChild<QObject *>(QStringLiteral("newPdfDialog"));
+    QVERIFY(tabs && button && picker);
+    QCOMPARE(tabs->count(), 0);
+    QVERIFY(button->isVisible() && button->isEnabled());
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QTRY_VERIFY(picker->property("visible").toBool());
+    QVERIFY(QMetaObject::invokeMethod(picker, "reject"));
+    QTRY_VERIFY(!picker->property("visible").toBool());
+    QCOMPARE(tabs->count(), 0);
+
+    const QString path = m_temporaryDirectory.filePath(QStringLiteral("Tài liệu mới.pdf"));
+    const QUrl target = QUrl::fromLocalFile(path);
+    QVERIFY(picker->setProperty("selectedFile", target));
+    QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+    QTRY_VERIFY(picker->property("visible").toBool());
+    QCOMPARE(picker->property("selectedFile").toUrl(), target);
+    auto *dialog = picker->property("dialog").value<QObject *>();
+    QSignalSpy accepted(picker, SIGNAL(accepted()));
+    QVERIFY(dialog && QMetaObject::invokeMethod(dialog, "accept"));
+    QCOMPARE(accepted.count(), 1);
+    QVERIFY2(tabs->count() == 1, qPrintable(root->property("transientStatus").toString()));
+    PDFDocumentSession *session = tabs->currentSession();
+    QVERIFY(session && session->document()->isLoaded());
+    QCOMPARE(session->document()->source(), target);
+    QCOMPARE(session->document()->pageCount(), 1);
+    const QSizeF size = session->document()->pageSize(0);
+    QVERIFY(qAbs(size.width() - 595) < 1 && qAbs(size.height() - 842) < 1);
+    QVERIFY(normalizedPageText(path).trimmed().isEmpty());
+    QCOMPARE(session->editController()->addBlankPage(), 1);
+    QVERIFY(session->editController()->save());
+
+    QVERIFY(!tabs->createBlankPdf(target));
+    QCOMPARE(tabs->count(), 1);
+    PDFDocument reopened;
+    QVERIFY(reopened.open(target));
+    QCOMPARE(reopened.pageCount(), 2);
+    QVERIFY(!tabs->createBlankPdf(QUrl::fromLocalFile(path + QStringLiteral("/invalid.pdf"))));
+    QCOMPARE(tabs->count(), 1);
+}
+
 void PDFEditControllerTest::opensNativePdfRequestsThroughMainWindow()
 {
     const QString plainPath = m_temporaryDirectory.filePath(QStringLiteral("native-open.pdf"));

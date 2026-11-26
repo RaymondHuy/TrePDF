@@ -16,6 +16,7 @@ Rectangle {
     required property PDFFormController formController
     required property PDFFormDesignerController formDesignerController
     property bool viewTabActive: false
+    property alias showCreateButton: emptyState.showCreateButton
     property bool headerTabActive: false
     property bool footerMode: false
     property TableCellEditing tableCellState: null
@@ -124,6 +125,7 @@ Rectangle {
 
     signal touchZoomRequested(real value)
     signal openRequested()
+    signal createRequested()
     signal beginSelectedEditingRequested(string styleAction)
     signal deleteCommentRequested(int page, string objectId)
     signal navigationSettled(int generation)
@@ -794,10 +796,12 @@ Rectangle {
     }
 
     DocumentEmptyState {
+        id: emptyState
         anchors.centerIn: parent
         theme: root.theme
         visible: !root.document.loaded
         onOpenRequested: root.openRequested()
+        onCreateRequested: root.createRequested()
     }
 
     Rectangle {

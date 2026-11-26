@@ -467,6 +467,12 @@ Aucune police de remplacement disponible ne prend en charge tous les caractères
         <source>Contact email</source>
         <translation>Adresse de contact</translation>
     </message>
+    <message id="NewPdf">
+        <location filename="../src/Main.qml" line="1744"/>
+        <location filename="../src/Components/DocumentEmptyState.qml" line="45"/>
+        <source>New PDF</source>
+        <translation>Nouveau PDF</translation>
+    </message>
     <message id="OpenPdf">
         <location filename="../src/Components/DocumentTabs.qml" line="60"/>
         <location filename="../src/Components/DocumentTabs.qml" line="63"/>

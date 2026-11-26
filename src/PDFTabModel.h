@@ -250,6 +250,7 @@ public:
 
     Q_INVOKABLE PDFDocumentSession *open(const QUrl &source,
                                        const QString &password = QString());
+    Q_INVOKABLE PDFDocumentSession *createBlankPdf(const QUrl &target);
     Q_INVOKABLE PDFDocumentSession *sessionAt(int index) const;
     Q_INVOKABLE int indexOf(PDFDocumentSession *session) const;
     Q_INVOKABLE bool closeSession(PDFDocumentSession *session);

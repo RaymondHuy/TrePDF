@@ -1,10 +1,30 @@
 #include "PDFTabModel.h"
+#include "PDFAtomicSaveFile.h"
 
 #include <QDir>
 #include <QFileInfo>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QtTranslation>
 
 #include <filesystem>
+
+namespace {
+bool writeBlankPdf(const QString &path)
+{
+    PDFAtomicSaveFile output(path);
+    if (!output.open(QIODevice::WriteOnly))
+        return false;
+    {
+        QPdfWriter writer(&output);
+        writer.setPageSize(QPageSize(QPageSize::A4));
+        QPainter painter;
+        if (!painter.begin(&writer) || !painter.end())
+            return false;
+    }
+    return output.commit();
+}
+} // namespace
 
 PDFViewState::PDFViewState(QObject *parent)
     : QObject(parent)
@@ -622,6 +642,36 @@ PDFDocumentSession *PDFTabModel::open(const QUrl &source, const QString &passwor
     emit countChanged();
     setCurrentIndex(insertionIndex);
     return session;
+}
+
+PDFDocumentSession *PDFTabModel::createBlankPdf(const QUrl &target)
+{
+    if (anySaving()) {
+        //% "Please wait for the PDF to finish saving."
+        emit statusMessage(qtTrId("WaitForPdfSave"));
+        return nullptr;
+    }
+    const QString identity = fileIdentity(target);
+    if (identity.isEmpty() || target.hasQuery() || target.hasFragment()
+        || QFileInfo(target.toLocalFile()).suffix().compare(QStringLiteral("pdf"), Qt::CaseInsensitive) != 0) {
+        //% "Only local PDF files are supported"
+        emit statusMessage(qtTrId("LocalPdfFilesOnly"));
+        return nullptr;
+    }
+    for (const PDFDocumentSession *session : m_sessions) {
+        if (fileIdentity(session->document()->source()) == identity) {
+            //% "Another open tab is already using that PDF file."
+            emit statusMessage(qtTrId("CannotSaveOverOpenPdf"));
+            return nullptr;
+        }
+    }
+    cancelOCRForDestination(target);
+    if (!writeBlankPdf(target.toLocalFile())) {
+        //% "The PDF could not be saved."
+        emit statusMessage(qtTrId("PdfSaveFailed"));
+        return nullptr;
+    }
+    return open(target);
 }
 
 PDFDocumentSession *PDFTabModel::sessionAt(int index) const

@@ -497,6 +497,12 @@ Tidak ada font pengganti yang tersedia yang mendukung semua karakter dan gaya te
         <source>Contact email</source>
         <translation>Email kontak</translation>
     </message>
+    <message id="NewPdf">
+        <location filename="../src/Main.qml" line="1744"/>
+        <location filename="../src/Components/DocumentEmptyState.qml" line="45"/>
+        <source>New PDF</source>
+        <translation>PDF Baru</translation>
+    </message>
     <message id="OpenPdf">
         <location filename="../src/Components/DocumentTabs.qml" line="60"/>
         <location filename="../src/Components/DocumentTabs.qml" line="63"/>
