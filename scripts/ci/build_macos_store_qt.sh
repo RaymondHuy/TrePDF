@@ -3,6 +3,9 @@
 set -euo pipefail
 prefix=${1:?Pass the absolute SDK install prefix}
 [[ "$prefix" = /* ]]
+# Qt rejects source and build paths containing symlinks (on macOS /var is one).
+mkdir -p "$prefix"
+prefix=$(cd -P "$prefix" && pwd -P)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 flags=(-G Ninja -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
@@ -13,7 +16,7 @@ flags=(-G Ninja -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_
 while read -r sha module; do
     name="$module-everywhere-src-6.11.0"
     (
-        cd "$work"
+        cd -P "$work"
         curl --fail --location --retry 3 -o source.tar.xz \
             "https://download.qt.io/archive/qt/6.11/6.11.0/submodules/$name.tar.xz"
         echo "$sha  source.tar.xz" | shasum -a 256 -c -
