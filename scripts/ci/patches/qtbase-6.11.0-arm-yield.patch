@@ -1,0 +1,20 @@
+Backport the qYieldCpu intrinsic order from Qt 6.11.1 for Apple Clang on arm64.
+https://github.com/qt/qtbase/blob/v6.11.1/src/corelib/thread/qyieldcpu.h
+
+--- a/src/corelib/thread/qyieldcpu.h
++++ b/src/corelib/thread/qyieldcpu.h
+@@ -34,6 +34,8 @@
+ #endif
+ {
+-#if __has_builtin(__yield)
++#if __has_builtin(__builtin_arm_yield)
++    __builtin_arm_yield();
++#elif __has_builtin(__yield)
+     __yield();              // Generic
+ #elif defined(_YIELD_PROCESSOR) && defined(Q_CC_MSVC)
+     _YIELD_PROCESSOR();     // Generic; MSVC's <atomic>
+@@ -51,4 +53,2 @@
+-#elif __has_builtin(__builtin_arm_yield)
+-    __builtin_arm_yield();
+ #elif defined(Q_PROCESSOR_ARM) && Q_PROCESSOR_ARM >= 7 && defined(Q_CC_GNU)
+     __asm__("yield");           // this works everywhere

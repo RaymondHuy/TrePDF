@@ -6,6 +6,7 @@ prefix=${1:?Pass the absolute SDK install prefix}
 # Qt rejects source and build paths containing symlinks (on macOS /var is one).
 mkdir -p "$prefix"
 prefix=$(cd -P "$prefix" && pwd -P)
+script_dir=$(cd -P "$(dirname "$0")" && pwd -P)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 flags=(-G Ninja -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
@@ -22,6 +23,7 @@ while read -r sha module; do
         echo "$sha  source.tar.xz" | shasum -a 256 -c -
         tar -xf source.tar.xz
         if [[ "$module" == qtbase ]]; then
+            patch -d "$name" -p1 -F 0 < "$script_dir/patches/qtbase-6.11.0-arm-yield.patch"
             cmake -S "$name" -B build "${flags[@]}" \
                 -DFEATURE_appstore_compliant=ON -DFEATURE_pkg_config=OFF \
                 -DFEATURE_icu=OFF -DFEATURE_openssl=OFF
