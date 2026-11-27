@@ -38,13 +38,13 @@ class MacAppStoreTests(unittest.TestCase):
             def run(command, *, check, timeout):
                 self.assertTrue(check)
                 self.assertGreater(timeout, 0)
-                if command[0] == "productbuild":
-                    self.assertEqual(command[:-1], ["productbuild", "--component", str(app), "/Applications"])
-                    Path(command[-1]).write_bytes(b"payload")
-                else:
-                    self.assertEqual(command[:-2], ["productsign", "--sign", installer, "--keychain", chain])
-                    self.assertEqual(Path(command[-2]).read_bytes(), b"payload")
-                    Path(command[-1]).write_bytes(b"signed")
+                self.assertEqual(command[:-1], ["productbuild", "--component", str(app), "/Applications"])
+                Path(command[-1]).write_bytes(b"payload")
+
+            def sign(command):
+                self.assertEqual(command[:-2], ["productsign", "--sign", installer, "--keychain", chain])
+                self.assertEqual(Path(command[-2]).read_bytes(), b"payload")
+                Path(command[-1]).write_bytes(b"signed")
 
             for valid in (False, True):
                 with self.subTest(valid=valid):
@@ -59,6 +59,7 @@ class MacAppStoreTests(unittest.TestCase):
                         return installer if valid else "Different certificate"
 
                     with patch.object(store.subprocess, "run", side_effect=run), \
+                         patch.object(store, "run_productsign", side_effect=sign), \
                          patch.object(store.subprocess, "check_output", side_effect=verify) as verification:
                         if valid:
                             store.sign_installer(app, pkg, installer, chain)
@@ -68,6 +69,22 @@ class MacAppStoreTests(unittest.TestCase):
                         verification.assert_called_once()
                     self.assertEqual(pkg.read_bytes(), b"signed" if valid else b"previous")
                     self.assertEqual(list(root.iterdir()), [pkg])
+
+    def test_timed_out_signer_logs_only_functions_and_terminates(self):
+        trace = "Path: /private/example\nCall graph:\n  +   42 SecKeyCreateSignature  (in Security) + 1\n"
+        with patch.object(store.subprocess, "Popen") as popen, \
+             patch.object(store.subprocess, "check_output", return_value=trace) as sample, \
+             patch("builtins.print") as logged:
+            signer = popen.return_value.__enter__.return_value
+            signer.pid = 123
+            signer.returncode = None
+            signer.wait.side_effect = subprocess.TimeoutExpired("productsign", 300)
+            with self.assertRaisesRegex(RuntimeError, "5-minute"):
+                store.run_productsign(["productsign"])
+            popen.assert_called_once_with(["productsign"], stdin=subprocess.DEVNULL)
+            self.assertEqual(sample.call_args.args[0][:2], ["/usr/bin/sample", "123"])
+            logged.assert_called_once_with("productsign stack: SecKeyCreateSignature", flush=True)
+            signer.kill.assert_called_once()
 
     @unittest.skipUnless(sys.platform == "darwin", "uses macOS packaging tools")
     def test_universal_bundle_entitlements_and_product_payload(self):
@@ -95,3 +112,40 @@ class MacAppStoreTests(unittest.TestCase):
             subprocess.run(["productbuild", "--component", app, "/Applications", package], check=True)
             subprocess.run(["pkgutil", "--expand", package, root / "expanded"], check=True)
             self.assertIn(store.BUNDLE_ID, (root / "expanded/Distribution").read_text())
+
+    def test_app_and_installer_keys_are_imported_in_separate_keychains(self):
+        actions = []
+        active = set()
+
+        def security(operation, *args):
+            actions.append((operation, args))
+            if operation == "create-keychain":
+                self.assertFalse(active)
+                active.add(args[-1])
+            elif operation == "delete-keychain":
+                active.remove(args[-1])
+            elif operation == "find-identity":
+                self.assertIn(args[-1], active)
+                kind = "Apple Distribution" if "codesigning" in args else "3rd Party Mac Developer Installer"
+                return f'  1) {"A" * 40} "{kind}: Example (ABCD123456)"'
+            return ""
+
+        with tempfile.TemporaryDirectory() as output, \
+             patch.object(store, "take_credentials", return_value=dict.fromkeys(store.SECRETS, "dGVzdA==")), \
+             patch.object(store, "prepare_bundle"), patch.object(store, "sign_macos_bundle"), \
+             patch.object(store.subprocess, "check_output", return_value=store.ENTITLEMENTS.read_bytes()), \
+             patch("macos_signing.security", side_effect=security), \
+             patch.object(store, "security", side_effect=security), patch.object(store, "sign_installer") as sign:
+            store.package(Path("Tre PDF.app"), Path(output), "1.0.0", "1")
+        imports = [args for op, args in actions if op == "import"]
+        self.assertEqual(len(imports), 2)
+        app_chain, installer_chain = [args[args.index("-k") + 1] for args in imports]
+        self.assertNotEqual(app_chain, installer_chain)
+        self.assertIn("/usr/bin/codesign", imports[0])
+        self.assertIn("/usr/bin/productsign", imports[1])
+        partitions = [args for op, args in actions if op == "set-key-partition-list"]
+        self.assertEqual([args[-1] for args in partitions], [app_chain, installer_chain])
+        for args in partitions:
+            self.assertNotIn("-s", args)
+        self.assertEqual(sign.call_args.args[-1], installer_chain)
+        self.assertFalse(active)

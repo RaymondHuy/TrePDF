@@ -48,11 +48,14 @@ def temporary_keychain(private):
         yield chain, password
 
 
-def import_p12(chain, private, encoded, password, tool):
+def import_p12(chain, private, encoded, password, tool, *additional_tools):
     cert = private / "certificate.p12"
     cert.write_bytes(base64.b64decode("".join(encoded.split()), validate=True))
     cert.chmod(0o600)
-    security("import", str(cert), "-k", chain, "-f", "pkcs12", "-P", password, "-T", tool)
+    access = ["-T", tool]
+    for additional_tool in additional_tools:
+        access.extend(("-T", additional_tool))
+    security("import", str(cert), "-k", chain, "-f", "pkcs12", "-P", password, *access)
     cert.unlink()
 
 

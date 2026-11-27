@@ -1,5 +1,6 @@
 """Produce a signed universal Mac App Store installer for manual delivery."""
 import argparse
+from contextlib import contextmanager
 from pathlib import Path
 import plistlib
 import re
@@ -38,6 +39,17 @@ def command_output(*args):
     return subprocess.check_output(args, text=True).strip()
 
 
+@contextmanager
+def store_keychain(encoded, p12_password, *trusted_tools):
+    # Each certificate gets a fresh keychain even when both were issued for the same key.
+    with tempfile.TemporaryDirectory(prefix="trepdf-mas-") as directory:
+        private = Path(directory)
+        with temporary_keychain(private) as (chain, password):
+            import_p12(chain, private, encoded, p12_password, *trusted_tools)
+            security("set-key-partition-list", "-S", "apple-tool:,apple:", "-k", password, chain)
+            yield chain
+
+
 def prepare_bundle(app, version, build):
     info_path = app / "Contents/Info.plist"
     info = plistlib.loads(info_path.read_bytes())
@@ -60,6 +72,34 @@ def prepare_bundle(app, version, build):
     info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
 
 
+def log_productsign_stack(pid):
+    # Only emit function names; the full sample contains paths and process metadata.
+    try:
+        sample = subprocess.check_output(
+            ["/usr/bin/sample", str(pid), "1", "10", "-file", "/dev/stdout"],
+            stderr=subprocess.DEVNULL, text=True, errors="replace", timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        sample = ""
+    graph = sample.partition("Call graph:")[2].partition("Total number in stack")[0]
+    symbols = re.findall(r"^[ +!:|\t]*\d+ +([\w.$:]+|[+-]\[[\w :()]+\]) +\(in ", graph, re.M)
+    frames = list(dict.fromkeys(symbols))[:40]
+    print("productsign stack: " + (" -> ".join(frames) or "sample unavailable"), flush=True)
+
+
+def run_productsign(command):
+    with subprocess.Popen(command, stdin=subprocess.DEVNULL) as signer:
+        try:
+            status = signer.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            log_productsign_stack(signer.pid)
+            raise RuntimeError("productsign exceeded its 5-minute signing limit") from None
+        finally:
+            if signer.returncode is None:
+                signer.kill()
+        if status:
+            raise subprocess.CalledProcessError(status, command)
+
+
 def sign_installer(app, pkg, installer, chain):
     with tempfile.TemporaryDirectory(dir=pkg.parent) as work:
         unsigned = Path(work) / "unsigned.pkg"
@@ -68,8 +108,7 @@ def sign_installer(app, pkg, installer, chain):
         subprocess.run(["productbuild", "--component", str(app), "/Applications", unsigned],
                        check=True, timeout=900)
         print("Signing installer with productsign (up to 5 minutes)", flush=True)
-        subprocess.run(["productsign", "--sign", installer, "--keychain", chain, unsigned, signed],
-                       check=True, timeout=300)
+        run_productsign(["productsign", "--sign", installer, "--keychain", chain, unsigned, signed])
         print("Verifying installer signature with pkgutil (up to 2 minutes)", flush=True)
         signature = subprocess.check_output(["pkgutil", "--check-signature", signed],
                                             text=True, timeout=120)
@@ -84,27 +123,25 @@ def package(app, output, version, build):
     prepare_bundle(app, version, build)
     output.mkdir(parents=True, exist_ok=True)
     pkg = output / f"TrePDF-{version}-{build}-macos-universal.pkg"
-    with tempfile.TemporaryDirectory(prefix="trepdf-mas-") as temp:
-        private = Path(temp)
-        with temporary_keychain(private) as (chain, password):
-            import_p12(chain, private, values["APPLE_DISTRIBUTION_BASE64"],
-                       values["APPLE_DISTRIBUTION_PASSWORD"], "/usr/bin/codesign")
-            import_p12(chain, private, values["APPLE_INSTALLER_BASE64"],
-                       values["APPLE_INSTALLER_PASSWORD"], "/usr/bin/productsign")
-            security("set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", password, chain)
-            app_id, _, app_team = identity(security("find-identity", "-v", "-p", "codesigning", chain),
-                                           ("Apple Distribution: ", "3rd Party Mac Developer Application: "))
-            _, installer, pkg_team = identity(security("find-identity", "-v", "-p", "basic", chain),
-                                              ("3rd Party Mac Developer Installer: ", "Mac Installer Distribution: "))
-            if app_team != pkg_team:
-                raise ValueError("Application and installer certificates must belong to the same Apple team")
-            sign_macos_bundle(app, ["--sign", app_id, "--keychain", chain], entitlements=ENTITLEMENTS)
-            print("Reading signed app entitlements with codesign (up to 1 minute)", flush=True)
-            signed = subprocess.check_output(["codesign", "-d", "--entitlements", "-", "--xml", str(app)],
-                                             timeout=60)
-            if plistlib.loads(signed) != plistlib.loads(ENTITLEMENTS.read_bytes()):
-                raise RuntimeError("Signed application entitlements differ from the Mac App Store entitlements")
-            sign_installer(app, pkg, installer, chain)
+    with store_keychain(values["APPLE_DISTRIBUTION_BASE64"], values["APPLE_DISTRIBUTION_PASSWORD"],
+                        "/usr/bin/codesign", "/usr/bin/security") as chain:
+        app_id, _, app_team = identity(security("find-identity", "-v", "-p", "codesigning", chain),
+                                       ("Apple Distribution: ", "3rd Party Mac Developer Application: "))
+        sign_macos_bundle(app, ["--sign", app_id, "--keychain", chain], entitlements=ENTITLEMENTS)
+        print("Reading signed app entitlements with codesign (up to 1 minute)", flush=True)
+        signed = subprocess.check_output(["codesign", "-d", "--entitlements", "-", "--xml", str(app)],
+                                         timeout=60)
+        if plistlib.loads(signed) != plistlib.loads(ENTITLEMENTS.read_bytes()):
+            raise RuntimeError("Signed application entitlements differ from the Mac App Store entitlements")
+
+    with store_keychain(values["APPLE_INSTALLER_BASE64"], values["APPLE_INSTALLER_PASSWORD"],
+                        "/usr/bin/productsign", "/usr/bin/productbuild",
+                        "/usr/bin/pkgbuild", "/usr/bin/security") as chain:
+        _, installer, pkg_team = identity(security("find-identity", "-v", "-p", "basic", chain),
+                                          ("3rd Party Mac Developer Installer: ", "Mac Installer Distribution: "))
+        if app_team != pkg_team:
+            raise ValueError("Application and installer certificates must belong to the same Apple team")
+        sign_installer(app, pkg, installer, chain)
     print(f"Ready for Transporter: {pkg}")
 
 
