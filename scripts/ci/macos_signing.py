@@ -16,9 +16,9 @@ SECRET_NAMES = ("APPLE_CERTIFICATE_BASE64", "APPLE_CERTIFICATE_PASSWORD",
                 "APPLE_API_KEY_BASE64", "APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID")
 
 
-def take_credentials():
+def take_credentials(names=SECRET_NAMES):
     # Do not pass the workflow secrets through to child processes (including TrePDF).
-    values = {name: os.environ.pop(name, "") for name in SECRET_NAMES}
+    values = {name: os.environ.pop(name, "") for name in names}
     missing = [name for name, value in values.items() if not value]
     if missing:
         raise ValueError("Missing macOS signing secrets: " + ", ".join(missing))
@@ -34,17 +34,8 @@ def security(operation, *arguments):
 
 
 @contextmanager
-def signing_assets(values):
-    with tempfile.TemporaryDirectory(prefix="trepdf-developer-id-") as directory, ExitStack() as cleanup:
-        private = Path(directory)
-        cert = private / "certificate.p12"
-        key = private / "AuthKey.p8"
-        for file, name in ((cert, "APPLE_CERTIFICATE_BASE64"), (key, "APPLE_API_KEY_BASE64")):
-            file.write_bytes(base64.b64decode("".join(values[name].split()), validate=True))
-            file.chmod(0o600)
-        if not key.read_bytes().startswith(b"-----BEGIN PRIVATE KEY-----"):
-            raise ValueError("APPLE_API_KEY_BASE64 must encode an App Store Connect .p8 key")
-
+def temporary_keychain(private):
+    with ExitStack() as cleanup:
         chain = str(private / "signing.keychain-db")
         password = secrets.token_urlsafe(32)
         previous = shlex.split(security("list-keychains", "-d", "user"))
@@ -54,9 +45,29 @@ def signing_assets(values):
         security("list-keychains", "-d", "user", "-s", chain, *previous)
         security("set-keychain-settings", "-lut", "21600", chain)
         security("unlock-keychain", "-p", password, chain)
-        security("import", str(cert), "-k", chain, "-f", "pkcs12", "-P",
-                 values["APPLE_CERTIFICATE_PASSWORD"], "-T", "/usr/bin/codesign")
-        cert.unlink()
+        yield chain, password
+
+
+def import_p12(chain, private, encoded, password, tool):
+    cert = private / "certificate.p12"
+    cert.write_bytes(base64.b64decode("".join(encoded.split()), validate=True))
+    cert.chmod(0o600)
+    security("import", str(cert), "-k", chain, "-f", "pkcs12", "-P", password, "-T", tool)
+    cert.unlink()
+
+
+@contextmanager
+def signing_assets(values):
+    with tempfile.TemporaryDirectory(prefix="trepdf-developer-id-") as directory, ExitStack() as stack:
+        private = Path(directory)
+        key = private / "AuthKey.p8"
+        key.write_bytes(base64.b64decode("".join(values["APPLE_API_KEY_BASE64"].split()), validate=True))
+        key.chmod(0o600)
+        if not key.read_bytes().startswith(b"-----BEGIN PRIVATE KEY-----"):
+            raise ValueError("APPLE_API_KEY_BASE64 must encode an App Store Connect .p8 key")
+        chain, password = stack.enter_context(temporary_keychain(private))
+        import_p12(chain, private, values["APPLE_CERTIFICATE_BASE64"],
+                   values["APPLE_CERTIFICATE_PASSWORD"], "/usr/bin/codesign")
         security("set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", password, chain)
         identities = security("find-identity", "-v", "-p", "codesigning", chain)
         matches = re.findall(r'^\s*\d+\) ([0-9A-Fa-f]{40}) "Developer ID Application: ', identities, re.M)

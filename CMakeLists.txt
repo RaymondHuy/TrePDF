@@ -187,12 +187,16 @@ if(WIN32 OR (APPLE AND NOT IOS))
 endif()
 
 if(APPLE AND NOT IOS)
+    option(TREPDF_MAC_APP_STORE "Deploy Qt plugins suitable for the Mac App Store" OFF)
+    set(TREPDF_MACOS_BUNDLE_ID "com.trebase.pdf")
     set(TREPDF_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/branding/TrePDF.icns")
     set_source_files_properties("${TREPDF_MACOS_ICON}" PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
     )
     target_sources(trepdf PRIVATE "${TREPDF_MACOS_ICON}")
     set_target_properties(trepdf PROPERTIES
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${TREPDF_MACOS_BUNDLE_ID}"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${TREPDF_MACOS_BUNDLE_ID}"
         MACOSX_BUNDLE_BUNDLE_NAME "${TREPDF_DESKTOP_APP_NAME}"
         MACOSX_BUNDLE_ICON_FILE "TrePDF.icns"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TrePDFInfo.plist.in"
@@ -733,6 +737,9 @@ if(TREPDF_DEPLOY_RUNTIME AND NOT IOS)
     endif()
 
     set(TREPDF_DEPLOY_PLUGIN_OPTIONS)
+    if(TREPDF_MAC_APP_STORE)
+        list(APPEND TREPDF_DEPLOY_PLUGIN_OPTIONS DEPLOY_TOOL_OPTIONS -appstore-compliant)
+    endif()
     if(NOT APPLE AND Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
         # Keep SVG readers and the headless CI smoke-test platform even when
         # the linker removes unused direct QtSvg references.

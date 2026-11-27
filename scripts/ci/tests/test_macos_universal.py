@@ -91,6 +91,7 @@ class UniversalDependenciesTests(unittest.TestCase):
             self.assertTrue(Path(root).is_dir())
             self.assertIn(f"{variable}={root}", env_file.read_text().splitlines())
         for name in universal.LIBRARIES:
-            subprocess.run(["lipo", output / name, "-verify_arch", "x86_64", "arm64"], check=True)
+            slices = subprocess.check_output(["lipo", "-archs", output / name], text=True).split()
+            self.assertEqual(set(slices), {"arm64", "x86_64"})
         self.assertTrue((output / "ocr/licenses/tesseract.txt").is_file())
         self.assertTrue((output / "licenses/libjpeg-turbo/LICENSE").is_file())

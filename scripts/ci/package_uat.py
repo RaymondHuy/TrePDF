@@ -30,7 +30,8 @@ def verify_macos_bundle(app: Path) -> None:
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
 
 
-def sign_macos_bundle(app: Path, developer_id: list[str] | None = None) -> None:
+def sign_macos_bundle(app: Path, identity: list[str] | None = None, *,
+                      entitlements: Path | None = None) -> None:
     # Deployment changes Mach-O load commands and adds bundle resources after
     # linking. Seal nested code first, then its containing bundles, then the app.
     mach_o_magic = {
@@ -50,10 +51,10 @@ def sign_macos_bundle(app: Path, developer_id: list[str] | None = None) -> None:
                 if stream.read(4) in mach_o_magic:
                     code.append(path)
     for path in sorted(code, key=lambda item: (-len(item.parts), str(item))) + [app]:
-        options = [*developer_id, "--options", "runtime"] if developer_id else ["--sign", "-", "--timestamp=none"]
-        if developer_id and path == app:
-            entitlements = Path(__file__).resolve().parents[2] / "platform/macos/DeveloperID.entitlements"
-            options += ["--entitlements", str(entitlements)]
+        options = [*identity, "--options", "runtime"] if identity else ["--sign", "-", "--timestamp=none"]
+        if identity and path == app:
+            app_entitlements = entitlements or Path(__file__).resolve().parents[2] / "platform/macos/DeveloperID.entitlements"
+            options += ["--entitlements", str(app_entitlements)]
         subprocess.run(["codesign", "--force", *options, str(path)], check=True)
     verify_macos_bundle(app)
 
