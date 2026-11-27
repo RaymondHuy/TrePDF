@@ -1,0 +1,147 @@
+name: Tre PDF - Mac App Store
+run-name: Mac App Store ${{ inputs.version }} (${{ inputs.build_number }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'App Store version, e.g. 1.0.0'
+        type: string
+        required: true
+      build_number:
+        description: 'Build number (CFBundleVersion), e.g. 42'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TREPDF_VERSION: ${{ inputs.version }}
+  STORE_BUILD: ${{ inputs.build_number }}
+  MACOS_DEPLOYMENT_TARGET: '13.0'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dependencies:
+    uses: ./.github/workflows/macos-universal-dependencies.yml
+    with:
+      version: ${{ inputs.version }}
+      variant: app-store
+      macos-target: '13.0'
+
+  qt:
+    name: Universal Qt 6.11.0 App Store SDK
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Check version and build number
+        run: python scripts/ci/macos_app_store.py check-version --version="$TREPDF_VERSION" --build="$STORE_BUILD"
+      - name: Identify Xcode toolchain
+        id: toolchain
+        run: xcodebuild -version | awk '/Build version/{print "build=" $3}' >> "$GITHUB_OUTPUT"
+      - name: Reuse App Store SDK
+        id: sdk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/store-qt
+          key: qt-store-6.11.0-universal-${{ steps.toolchain.outputs.build }}-${{ hashFiles('scripts/ci/build_macos_store_qt.sh') }}
+      - name: Compile Qt with App Store compliance enabled
+        if: steps.sdk.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install 'cmake==3.31.6' 'ninja==1.11.1.3'
+          bash scripts/ci/build_macos_store_qt.sh "$RUNNER_TEMP/store-qt"
+      - name: Archive SDK with framework symlinks and executable modes
+        run: tar -C "$RUNNER_TEMP/store-qt" -czf store-qt.tar.gz .
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: internal-app-store-qt
+          path: store-qt.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  package:
+    name: Build and sign Mac App Store installer
+    needs: [dependencies, qt]
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'cmake==3.31.6' 'ninja==1.11.1.3'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: internal-app-store-qt
+          path: incoming
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: internal-deps-app-store-*
+          path: incoming
+          merge-multiple: true
+      - name: Restore SDK and merge native dependencies
+        run: |
+          mkdir -p "$RUNNER_TEMP/store-qt" _deps/slices/{arm64,x64}
+          tar -xzf incoming/store-qt.tar.gz -C "$RUNNER_TEMP/store-qt"
+          tar -xzf incoming/deps-macos-arm64.tar.gz -C _deps/slices/arm64
+          tar -xzf incoming/deps-macos-x64.tar.gz -C _deps/slices/x64
+          python scripts/ci/macos_universal.py merge \
+            --arm64 _deps/slices/arm64 --x64 _deps/slices/x64 --output _deps/universal
+      - name: Build and deploy Universal Release
+        run: |
+          qt="$RUNNER_TEMP/store-qt"
+          cmake -S . -B build/store -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF -DTREPDF_DEPLOY_RUNTIME=ON -DTREPDF_MAC_APP_STORE=ON \
+            "-DTREPDF_VERSION=$TREPDF_VERSION" "-DQt6_DIR=$qt/lib/cmake/Qt6" \
+            "-DCMAKE_PREFIX_PATH=$qt" "-DPDFium_ROOT=$PDFium_ROOT" \
+            "-DQPDF_ROOT=$QPDF_ROOT" "-DOCR_ROOT=$OCR_ROOT" \
+            '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' \
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOS_DEPLOYMENT_TARGET"
+          cmake --build build/store --target trepdf --parallel 3
+          cmake --install build/store --prefix "$PWD/build/store-stage"
+          notices="build/store-stage/Tre PDF.app/Contents/Resources/licenses"
+          ditto _deps/universal/licenses "$notices"
+          mkdir -p "$notices/libxlsxwriter"
+          cp third_party/libxlsxwriter/License.txt "$notices/libxlsxwriter/"
+      - name: Test the deployed Qt runtime before distribution signing
+        run: |
+          PYTHONPATH=scripts/ci python - <<'PY'
+          from pathlib import Path
+          from package_uat import sign_macos_bundle, smoke_test
+
+          app = Path("build/store-stage/Tre PDF.app").resolve()
+          sign_macos_bundle(app)
+          smoke_test(app / "Contents/MacOS/Tre PDF", "macos-universal")
+          PY
+      - name: Sign app and installer and verify package
+        env:
+          APPLE_DISTRIBUTION_BASE64: ${{ secrets.APPLE_DISTRIBUTION_BASE64 }}
+          APPLE_DISTRIBUTION_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_PASSWORD }}
+          APPLE_INSTALLER_BASE64: ${{ secrets.APPLE_INSTALLER_BASE64 }}
+          APPLE_INSTALLER_PASSWORD: ${{ secrets.APPLE_INSTALLER_PASSWORD }}
+        run: |
+          python scripts/ci/macos_app_store.py package \
+            --app "build/store-stage/Tre PDF.app" --output artifacts \
+            --version="$TREPDF_VERSION" --build="$STORE_BUILD"
+      - name: Downloadable package for Transporter
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          path: artifacts/*.pkg
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
