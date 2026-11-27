@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import macos_app_store as store
@@ -25,6 +26,48 @@ class MacAppStoreTests(unittest.TestCase):
                         listing + "\n" + listing):
             with self.assertRaises(ValueError):
                 store.identity(invalid, ("Apple Distribution: ",))
+
+    def test_publish_only_the_verified_installer(self):
+        installer = "Mac Installer Distribution: Example (ABCD123456)"
+        chain = "test.keychain-db"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            pkg = root / "Tre PDF.pkg"
+            app = root / "Tre PDF.app"
+
+            def run(command, *, check, timeout):
+                self.assertTrue(check)
+                self.assertGreater(timeout, 0)
+                if command[0] == "productbuild":
+                    self.assertEqual(command[:-1], ["productbuild", "--component", str(app), "/Applications"])
+                    Path(command[-1]).write_bytes(b"payload")
+                else:
+                    self.assertEqual(command[:-2], ["productsign", "--sign", installer, "--keychain", chain])
+                    self.assertEqual(Path(command[-2]).read_bytes(), b"payload")
+                    Path(command[-1]).write_bytes(b"signed")
+
+            for valid in (False, True):
+                with self.subTest(valid=valid):
+                    pkg.write_bytes(b"previous")
+
+                    def verify(command, *, text, timeout):
+                        self.assertTrue(text)
+                        self.assertGreater(timeout, 0)
+                        self.assertEqual(command[:-1], ["pkgutil", "--check-signature"])
+                        self.assertEqual(Path(command[-1]).read_bytes(), b"signed")
+                        self.assertEqual(pkg.read_bytes(), b"previous")
+                        return installer if valid else "Different certificate"
+
+                    with patch.object(store.subprocess, "run", side_effect=run), \
+                         patch.object(store.subprocess, "check_output", side_effect=verify) as verification:
+                        if valid:
+                            store.sign_installer(app, pkg, installer, chain)
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, "certificate"):
+                                store.sign_installer(app, pkg, installer, chain)
+                        verification.assert_called_once()
+                    self.assertEqual(pkg.read_bytes(), b"signed" if valid else b"previous")
+                    self.assertEqual(list(root.iterdir()), [pkg])
 
     @unittest.skipUnless(sys.platform == "darwin", "uses macOS packaging tools")
     def test_universal_bundle_entitlements_and_product_payload(self):

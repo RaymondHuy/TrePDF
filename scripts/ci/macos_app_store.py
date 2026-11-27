@@ -60,6 +60,25 @@ def prepare_bundle(app, version, build):
     info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
 
 
+def sign_installer(app, pkg, installer, chain):
+    with tempfile.TemporaryDirectory(dir=pkg.parent) as work:
+        unsigned = Path(work) / "unsigned.pkg"
+        signed = Path(work) / "signed.pkg"
+        print("Building installer payload with productbuild (up to 15 minutes)", flush=True)
+        subprocess.run(["productbuild", "--component", str(app), "/Applications", unsigned],
+                       check=True, timeout=900)
+        print("Signing installer with productsign (up to 5 minutes)", flush=True)
+        subprocess.run(["productsign", "--sign", installer, "--keychain", chain, unsigned, signed],
+                       check=True, timeout=300)
+        print("Verifying installer signature with pkgutil (up to 2 minutes)", flush=True)
+        signature = subprocess.check_output(["pkgutil", "--check-signature", signed],
+                                            text=True, timeout=120)
+        if installer not in signature:
+            raise RuntimeError("Unexpected installer signing certificate")
+        print(signature, flush=True)
+        signed.replace(pkg)
+
+
 def package(app, output, version, build):
     values = take_credentials(SECRETS)
     prepare_bundle(app, version, build)
@@ -71,7 +90,7 @@ def package(app, output, version, build):
             import_p12(chain, private, values["APPLE_DISTRIBUTION_BASE64"],
                        values["APPLE_DISTRIBUTION_PASSWORD"], "/usr/bin/codesign")
             import_p12(chain, private, values["APPLE_INSTALLER_BASE64"],
-                       values["APPLE_INSTALLER_PASSWORD"], "/usr/bin/productbuild")
+                       values["APPLE_INSTALLER_PASSWORD"], "/usr/bin/productsign")
             security("set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-k", password, chain)
             app_id, _, app_team = identity(security("find-identity", "-v", "-p", "codesigning", chain),
                                            ("Apple Distribution: ", "3rd Party Mac Developer Application: "))
@@ -80,15 +99,12 @@ def package(app, output, version, build):
             if app_team != pkg_team:
                 raise ValueError("Application and installer certificates must belong to the same Apple team")
             sign_macos_bundle(app, ["--sign", app_id, "--keychain", chain], entitlements=ENTITLEMENTS)
-            signed = subprocess.check_output(["codesign", "-d", "--entitlements", "-", "--xml", str(app)])
+            print("Reading signed app entitlements with codesign (up to 1 minute)", flush=True)
+            signed = subprocess.check_output(["codesign", "-d", "--entitlements", "-", "--xml", str(app)],
+                                             timeout=60)
             if plistlib.loads(signed) != plistlib.loads(ENTITLEMENTS.read_bytes()):
                 raise RuntimeError("Signed application entitlements differ from the Mac App Store entitlements")
-            subprocess.run(["productbuild", "--component", str(app), "/Applications",
-                            "--sign", installer, "--keychain", chain, str(pkg)], check=True)
-            signature = command_output("pkgutil", "--check-signature", str(pkg))
-            if installer not in signature:
-                raise RuntimeError("Unexpected installer signing certificate")
-            print(signature)
+            sign_installer(app, pkg, installer, chain)
     print(f"Ready for Transporter: {pkg}")
 
 
