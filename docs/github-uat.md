@@ -1,5 +1,35 @@
 # Manual UAT builds
 
+## Mac App Store
+
+Register the explicit macOS Bundle ID `com.trebase.pdf` in Apple Developer and select it
+when creating the macOS app in App Store Connect. Run **Tre PDF - Mac App Store** in
+GitHub Actions. Enter the marketing version (for example `1.0.0`) and a build number
+(for example `42`) higher than the last one delivered. Both fields are required.
+
+The workflow reads these four GitHub Actions repository secrets during signing.
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_DISTRIBUTION_BASE64` | Base64 of the Apple Distribution certificate and private key exported as a PKCS#12 file |
+| `APPLE_DISTRIBUTION_PASSWORD` | Password of that PKCS#12 file |
+| `APPLE_INSTALLER_BASE64` | Base64 of the Mac Installer Distribution certificate and private key exported as a PKCS#12 file |
+| `APPLE_INSTALLER_PASSWORD` | Password of the installer PKCS#12 file |
+
+Both certificates must belong to the same Apple team. The first build compiles the Qt 6.11.0
+Universal SDK with App Store compliance enabled. Later builds can reuse the cached SDK.
+The installer targets Intel and Apple Silicon Macs running macOS 13 or newer.
+
+Download the `TrePDF-<version>-<build>-macos-universal.pkg` artifact and deliver it with Transporter.
+After Apple processes it, select the build on the macOS version page in App Store Connect
+and submit it for review. [Apple’s upload instructions](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/).
+
+This workflow targets direct Mac App Store review. The sandbox, user-selected file access,
+outgoing network and JIT entitlements used here can be signed without a provisioning profile.
+TestFlight requires a profile. [Apple TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles).
+
+## UAT installers
+
 The [`Tre PDF UAT` workflow](../.github/workflows/uat.yml) builds Windows, Apple Silicon
 and Linux Release packages. The separate
 [`Tre PDF UAT - macOS Intel` workflow](../.github/workflows/uat-macos-intel.yml) builds only
