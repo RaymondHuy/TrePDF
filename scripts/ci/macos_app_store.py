@@ -12,7 +12,7 @@ from macos_compat import verify_tree
 from macos_signing import import_p12, security, take_credentials, temporary_keychain
 from package_uat import sign_macos_bundle
 
-BUNDLE_ID = "com.trebase.pdf"
+BUNDLE_ID = "com.trebase.trepdf"
 ENTITLEMENTS = Path(__file__).resolve().parents[2] / "platform/macos/AppStore.entitlements"
 SECRETS = ("APPLE_DISTRIBUTION_BASE64", "APPLE_DISTRIBUTION_PASSWORD",
            "APPLE_INSTALLER_BASE64", "APPLE_INSTALLER_PASSWORD")

@@ -188,7 +188,7 @@ endif()
 
 if(APPLE AND NOT IOS)
     option(TREPDF_MAC_APP_STORE "Deploy Qt plugins suitable for the Mac App Store" OFF)
-    set(TREPDF_MACOS_BUNDLE_ID "com.trebase.pdf")
+    set(TREPDF_MACOS_BUNDLE_ID "com.trebase.trepdf")
     set(TREPDF_MACOS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/branding/TrePDF.icns")
     set_source_files_properties("${TREPDF_MACOS_ICON}" PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"

@@ -2,7 +2,7 @@
 
 ## Mac App Store
 
-Register the explicit macOS Bundle ID `com.trebase.pdf` in Apple Developer and select it
+Register the explicit macOS Bundle ID `com.trebase.trepdf` in Apple Developer and select it
 when creating the macOS app in App Store Connect. Run **Tre PDF - Mac App Store** in
 GitHub Actions. Enter the marketing version (for example `1.0.0`) and a build number
 (for example `42`) higher than the last one delivered. Both fields are required.
