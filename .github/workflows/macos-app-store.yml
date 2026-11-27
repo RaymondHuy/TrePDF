@@ -54,7 +54,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ runner.temp }}/store-qt
-          key: qt-store-6.11.0-universal-${{ steps.toolchain.outputs.build }}-${{ hashFiles('scripts/ci/build_macos_store_qt.sh') }}
+          key: qt-store-6.11.0-universal-${{ steps.toolchain.outputs.build }}-${{ hashFiles('scripts/ci/build_macos_store_qt.sh', 'scripts/ci/patches/qtbase-6.11.0-arm-yield.patch') }}
       - name: Compile Qt with App Store compliance enabled
         if: steps.sdk.outputs.cache-hit != 'true'
         run: |
